@@ -21,6 +21,7 @@ The spec is in `Argentine Startups Flag — Product and Technical Spec.md`.
 | `src/app/api/upload` | Public upload route. All cheap checks run before Supabase. |
 | `src/app/api/admin/*` | Login (password step), approve (re-encode with `sharp`), remove. |
 | `src/app/api/cron` | Hourly cleanup, keep-alive, manifest rebuild, Slack alerts. |
+| `src/app/files/manifest.json` | Serves the manifest past the Supabase Storage CDN (see "Caching" below). |
 | `src/app/admin` | Admin panel and sign-in. |
 | `src/proxy.ts` | Admin gate (Next.js 16 "proxy", formerly middleware). Plain 404 for everyone else. |
 | `supabase/migrations` | Tables, RLS, functions, buckets, `pg_cron` job. |
@@ -55,7 +56,8 @@ Do these steps in order.
    Then add the row: `insert into public.admins (user_id) values ('<user id>');`
 4. **First sign-in.** Open `/admin/login`. After the password, the page shows a QR code. Scan it and enter
    the code. From then on, every sign-in needs the TOTP code.
-5. **Vault secrets** for the hourly job (SQL editor):
+5. **Vault secrets** for the hourly job (SQL editor). `cron_url` is already set. Use the `CRON_SECRET`
+   from `.env.production.local` (gitignored), and set the same value on Vercel:
    ```sql
    select vault.create_secret('https://flag.ar/api/cron', 'cron_url');
    select vault.create_secret('<CRON_SECRET>', 'cron_secret');
@@ -73,6 +75,16 @@ Do these steps in order.
 10. **Slack.** Create an incoming webhook and set `SLACK_WEBHOOK_URL`.
 11. **Check.** `curl -I https://flag.ar/files/manifest.json` twice. The second reply must show
     `x-vercel-cache: HIT`. This answers the spec's open question about the CDN.
+
+## Caching
+
+- The Supabase Free plan has the Basic Storage CDN. It does not purge a file when the file changes.
+  So `manifest.json` is not read through the public URL. `src/app/files/manifest.json/route.ts`
+  reads it from the authenticated Storage endpoint, and Vercel caches the reply for 30 s.
+- Logo files (`/files/<id>.png`) go through the rewrite and are cached for one year. Each name is unique,
+  so this is safe for approvals. After a removal, the flag stops showing the logo at once (the manifest
+  drops it), but the direct file URL can stay in the CDN caches. For abusive content, also purge
+  `/files/<id>.png` from the Vercel CDN cache.
 
 ## Monthly backup
 
