@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   description: "A waving Argentine flag made of the logos of Argentine startups. Add yours.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar"),
   openGraph: { title: "Argentine Startups Flag", url: "/", type: "website" },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {
