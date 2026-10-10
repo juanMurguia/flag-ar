@@ -1,7 +1,7 @@
 // Pure checks for the upload route. No I/O here, so unit tests cover them.
 
 export const MAX_FILE_BYTES = 512 * 1024;
-// Multipart overhead on top of the file: link, captcha token, field headers.
+// Multipart overhead on top of the file: link, honeypot, field headers.
 export const MAX_BODY_BYTES = MAX_FILE_BYTES + 16 * 1024;
 export const MIN_FORM_MS = 3000;
 

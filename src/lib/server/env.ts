@@ -15,9 +15,6 @@ export const env = {
   serviceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),
   ipHashSalt: () => required("IP_HASH_SALT"),
   cronSecret: () => required("CRON_SECRET"),
-  hcaptchaSecret: () =>
-    process.env.HCAPTCHA_SECRET || (isProd ? required("HCAPTCHA_SECRET") : "0x0000000000000000000000000000000000000000"),
-  hcaptchaSiteKey: () => process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY || "10000000-ffff-ffff-ffff-000000000001",
   upstashUrl: () => process.env.UPSTASH_REDIS_REST_URL,
   upstashToken: () => process.env.UPSTASH_REDIS_REST_TOKEN,
   slackWebhook: () => process.env.SLACK_WEBHOOK_URL,

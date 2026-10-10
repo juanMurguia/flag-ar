@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { alert } from "@/lib/server/alerts";
-import { verifyCaptcha } from "@/lib/server/captcha";
 import { env, isProd } from "@/lib/server/env";
 import { countEvent, hashIp, hourlyCounter, limit } from "@/lib/server/ratelimit";
 import { BUCKET_PENDING, serviceClient } from "@/lib/server/supabase";
@@ -104,10 +103,6 @@ export async function POST(req: Request) {
 
   const link = normalizeLink(String(form.get("link") ?? ""));
   if (!link.ok) return reply(400, link.reason);
-
-  if (!(await verifyCaptcha(String(form.get("captcha") ?? ""), ip))) {
-    return reply(400, "The check failed. Try again.");
-  }
 
   const db = serviceClient();
   try {

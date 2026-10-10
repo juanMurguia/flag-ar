@@ -35,9 +35,23 @@ body {
 .flag-holder { position: absolute; inset: 0; cursor: grab; }
 .flag-holder canvas:focus-visible { outline-offset: -4px; }
 
+/* Bottom UI: startup details (when open) above the toolbar. The scene keeps the flags above its top edge. */
+.dock {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; pointer-events: none;
+  display: grid; gap: 20px; justify-items: center;
+  padding: 0 16px max(16px, env(safe-area-inset-bottom));
+}
+.dock > * { pointer-events: auto; }
+/* Dusk scrim behind the text. Drawn above the dock, so it does not change the measured inset. */
+.dock.open::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; top: -90px; z-index: -1;
+  background: linear-gradient(to bottom, rgba(26, 20, 52, 0), rgba(26, 20, 52, 0.62) 45%, rgba(18, 14, 38, 0.86));
+  pointer-events: none; animation: fade-in 0.8s ease both;
+}
+
 /* Centered with auto margins, not translateX(-50%): that trick caps the width at half the screen. */
 .toolbar {
-  position: absolute; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom));
+  position: relative;
   width: fit-content; max-width: calc(100vw - 32px); margin-inline: auto;
   display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;
   padding: 4px; border-radius: 999px; background: var(--card);
@@ -75,15 +89,51 @@ body {
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.wide { width: 100%; }
 
-.card {
-  position: absolute; top: 16px; right: 16px; width: min(300px, calc(100vw - 32px));
-  display: grid; gap: 8px; padding: 12px; border-radius: var(--radius);
-  background: var(--card); box-shadow: 0 10px 40px rgba(40, 15, 30, 0.3);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+/* ---------- Startup view ---------- */
+
+.back {
+  position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 10px;
+  border: 1px solid rgba(255, 244, 228, 0.35); border-radius: 999px; background: rgba(26, 20, 52, 0.28);
+  color: #fff4e4; font: inherit; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; cursor: pointer;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  animation: fade-in 0.6s ease 0.3s both;
 }
-.card-domain { margin: 0 0 0 2px; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
-.card-actions { display: flex; gap: 6px; align-items: center; }
-.card-actions .btn.ghost.icon { margin-left: auto; }
+.back:hover { background: rgba(26, 20, 52, 0.45); }
+
+/* Editorial block: type on the scene, no card. Appears after the flag starts to rise. */
+.startup {
+  width: min(880px, 100%); color: #fff4e4; display: grid; gap: 6px;
+  animation: rise-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.9s both;
+}
+.startup-trail {
+  margin: 0; display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 244, 228, 0.72);
+}
+.startup-trail span:first-child { color: #9fcbf0; }
+.startup-name {
+  margin: 0; font-size: clamp(30px, 5.2vw, 56px); line-height: 1.02; font-weight: 800; letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+.startup-meta { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: rgba(255, 244, 228, 0.82); }
+.startup-desc { margin: 6px 0 0; max-width: 60ch; font-size: 17px; line-height: 1.45; color: rgba(255, 244, 228, 0.92); }
+.startup-links { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.startup-cta {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 18px;
+  border-radius: 999px; background: #fff4e4; color: #1a1434; font-weight: 700; font-size: 15px; text-decoration: none;
+}
+.startup-cta:hover { background: #ffffff; }
+.startup-cta svg { transition: transform 0.2s ease; }
+.startup-cta:hover svg { transform: translateX(3px); }
+.startup-domain { font-size: 14px; color: rgba(255, 244, 228, 0.7); }
+.startup-social { font-size: 14px; font-weight: 600; color: #fff4e4; text-underline-offset: 3px; }
+
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(14px); } }
+@media (prefers-reduced-motion: reduce) {
+  .startup, .back, .dock.open::before { animation-duration: 0.01s; animation-delay: 0s; }
+}
+
 .card-close {
   position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border: 0; border-radius: 50%;
   background: transparent; cursor: pointer; color: var(--muted); display: grid; place-items: center;
@@ -92,10 +142,11 @@ body {
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
 .brand-list ul { list-style: none; margin: 0; padding: 0; }
-.brand-list a {
+.brand-list button {
+  border: 0; font: inherit; cursor: pointer;
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }
-.brand-list a:focus {
+.brand-list button:focus {
   position: fixed; top: 16px; left: 16px; width: auto; height: auto; clip: auto;
   padding: 10px 14px; border-radius: 8px; background: #fff; color: var(--ink); z-index: 10;
 }
@@ -121,7 +172,6 @@ body {
 }
 .field textarea { min-height: 70px; resize: vertical; }
 .hp { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; }
-.captcha { min-height: 78px; }
 .error { margin: 0; color: var(--danger); font-size: 14px; }
 .done p { font-size: 17px; }
 
@@ -176,10 +226,14 @@ body {
 .queue-age { color: var(--muted); font-size: 13px; }
 .side { padding: 16px; display: grid; gap: 14px; align-content: start; }
 .previews { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.preview { display: grid; place-items: center; height: 220px; border-radius: var(--radius); border: 1px solid var(--line); }
+/* Flex, not grid: in an auto grid row, max-height: 85% has no definite base and the image overflows. */
+.preview {
+  display: flex; align-items: center; justify-content: center; height: 220px; min-width: 0; overflow: hidden;
+  border-radius: var(--radius); border: 1px solid var(--line);
+}
 .preview.light { background: #fff; }
 .preview.dark { background: #151a21; }
-.preview img { max-width: 85%; max-height: 85%; object-fit: contain; }
+.preview img { max-width: 85%; max-height: 85%; width: auto; height: auto; object-fit: contain; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
@@ -189,12 +243,9 @@ body {
 /* ---------- Small screens (after the base rules, so these win) ---------- */
 
 @media (max-width: 480px) {
-  /* Bottom sheet above the toolbar, so the flag stays visible above it. */
-  .card {
-    top: auto; left: 16px; right: 16px; width: auto;
-    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 58px);
-    max-height: calc(100dvh - 120px); overflow-y: auto;
-  }
+  .dock { gap: 14px; }
+  .startup-desc { font-size: 15px; }
+  .startup-links { margin-top: 8px; }
   .dialog { padding: 20px 16px; }
 }
 
@@ -204,5 +255,5 @@ body {
   .drop { min-height: 72px; }
   .dialog h2 { margin-bottom: 10px; }
   .dialog form { gap: 10px; }
-  .card { top: 12px; bottom: auto; max-height: calc(100dvh - 90px); overflow-y: auto; }
+  .startup-desc { display: none; } /* landscape phones: keep the flags in view */
 }

@@ -2,17 +2,16 @@ import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV !== "production";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const hcaptcha = "https://hcaptcha.com https://*.hcaptcha.com";
 
 function csp(extra: { connect?: string; img?: string } = {}) {
   return [
     "default-src 'self'",
     // Next.js needs inline scripts for hydration. A nonce would make the flag page dynamic (no CDN cache).
-    `script-src 'self' 'unsafe-inline' ${hcaptcha}${isDev ? " 'unsafe-eval'" : ""}`,
-    `style-src 'self' 'unsafe-inline' ${hcaptcha}`,
+    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${extra.img ?? ""}`.trim(),
-    `connect-src 'self' ${hcaptcha} ${extra.connect ?? ""}${isDev ? " ws:" : ""}`.trim(),
-    `frame-src ${hcaptcha}`,
+    `connect-src 'self' ${extra.connect ?? ""}${isDev ? " ws:" : ""}`.trim(),
+    "frame-src 'none'",
     "worker-src 'self' blob:",
     "font-src 'self'",
     "object-src 'none'",

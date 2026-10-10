@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import HCaptcha from "./HCaptcha";
 import Icon from "./Icon";
 
 const MAX_SIDE = 512;
@@ -46,8 +45,6 @@ export default function UploadDialog({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [link, setLink] = useState("");
-  const [token, setToken] = useState<string | null>(null);
-  const [captchaReset, setCaptchaReset] = useState(0);
   const [drag, setDrag] = useState(false);
   const [state, setState] = useState<State>({ kind: "idle" });
 
@@ -82,18 +79,21 @@ export default function UploadDialog({ onClose }: { onClose: () => void }) {
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!file || !link.trim()) return;
-    if (!token) {
-      setState({ kind: "error", message: "Complete the check first." });
+    // Read the form now: React sets e.currentTarget to null after the first await.
+    const honeypot = (e.currentTarget.elements.namedItem("company") as HTMLInputElement | null)?.value ?? "";
+    setState({ kind: "sending" });
+    let png: Blob;
+    try {
+      png = await toPng(file);
+    } catch {
+      setState({ kind: "error", message: "We could not read that image. Try another file." });
       return;
     }
-    setState({ kind: "sending" });
     try {
-      const png = await toPng(file);
       const form = new FormData();
       form.set("logo", png, "logo.png");
       form.set("link", link.trim());
-      form.set("captcha", token);
-      form.set("company", (e.currentTarget.elements.namedItem("company") as HTMLInputElement).value);
+      form.set("company", honeypot);
       form.set("elapsed", String(Date.now() - openedAt.current));
       const res = await fetch("/api/upload", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as { message?: string };
@@ -103,9 +103,8 @@ export default function UploadDialog({ onClose }: { onClose: () => void }) {
       }
       setState({ kind: "error", message: body.message || "Upload failed. Try again later." });
     } catch {
-      setState({ kind: "error", message: "We could not read that image. Try another file." });
+      setState({ kind: "error", message: "Network error. Check your connection and try again." });
     }
-    setCaptchaReset((n) => n + 1);
   }
 
   return (
@@ -145,7 +144,6 @@ export default function UploadDialog({ onClose }: { onClose: () => void }) {
           </label>
           {/* Honeypot: people never see or fill this. */}
           <input type="text" name="company" tabIndex={-1} autoComplete="off" className="hp" aria-hidden="true" />
-          <HCaptcha onToken={setToken} resetKey={captchaReset} />
           {state.kind === "error" && <p className="error" role="alert">{state.message}</p>}
           <button className="btn primary wide" type="submit" disabled={state.kind === "sending" || !file || !link}>
             {state.kind === "sending" ? "Sending…" : "Add to flag"}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import HCaptcha from "@/components/HCaptcha";
 import { browserClient } from "@/lib/client/supabase";
 
 type Step =
@@ -14,8 +13,6 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [captcha, setCaptcha] = useState<string | null>(null);
-  const [captchaReset, setCaptchaReset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -27,12 +24,11 @@ export default function LoginForm() {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, captcha }),
+        body: JSON.stringify({ email, password }),
       });
       const body = (await res.json().catch(() => ({}))) as { message?: string; next?: string; factorId?: string };
       if (!res.ok) {
         setError(body.message || "Sign-in failed.");
-        setCaptchaReset((n) => n + 1);
         return;
       }
       setPassword("");
@@ -89,7 +85,6 @@ export default function LoginForm() {
             onChange={(e) => setPassword(e.target.value)} required
           />
         </label>
-        <HCaptcha onToken={setCaptcha} resetKey={captchaReset} />
         {error && <p className="error" role="alert">{error}</p>}
         <button className="btn primary wide" disabled={busy}>Continue</button>
       </form>

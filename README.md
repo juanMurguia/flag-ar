@@ -5,7 +5,7 @@ One full-screen page with a 3D Argentine flag. Startups add their logo. The owne
 - Flag page: static Next.js page, Three.js r128 (pinned), Verlet cloth.
 - Server: Next.js route handlers on Vercel. No Supabase Edge Functions.
 - Backend: Supabase Postgres, Auth (password + TOTP), Storage.
-- Abuse control: Vercel Firewall, Upstash Redis rate limits, hCaptcha.
+- Abuse control: Vercel Firewall, Upstash Redis rate limits, honeypot and timing checks, manual review.
 
 The spec is in `Argentine Startups Flag — Product and Technical Spec.md`.
 
@@ -17,7 +17,7 @@ The spec is in `Argentine Startups Flag — Product and Technical Spec.md`.
 | `src/lib/flag/layout.ts` | Layout units, patch slots, picking math, manifest types. |
 | `src/lib/flag/texture.ts` | Canvas drawing: bands, sun, hem, patches, weave. |
 | `src/lib/flag/scene.ts` | Three.js scene, controls, picking, quality tuning, PNG export. |
-| `src/components/` | Flag page UI, upload dialog, hCaptcha, no-WebGL fallback. |
+| `src/components/` | Flag page UI, upload dialog, no-WebGL fallback. |
 | `src/app/api/upload` | Public upload route. All cheap checks run before Supabase. |
 | `src/app/api/admin/*` | Login (password step), approve (re-encode with `sharp`), remove. |
 | `src/app/api/cron` | Hourly cleanup, keep-alive, manifest rebuild, Slack alerts. |
@@ -49,7 +49,6 @@ Do these steps in order.
    `npx supabase link --project-ref <ref>` then `npx supabase db push`.
 2. **Auth settings (dashboard).**
    - Turn off sign-ups. Turn off email confirmations, magic links, and password recovery emails.
-   - Attack Protection: turn on CAPTCHA, provider hCaptcha, with your hCaptcha secret.
    - JWT expiry: 900 seconds.
    - MFA: TOTP on (enroll and verify).
 3. **Owner user.** Authentication > Users > Add user. Use a long random password. Check "Auto confirm".
@@ -63,16 +62,15 @@ Do these steps in order.
    select vault.create_secret('<CRON_SECRET>', 'cron_secret');
    ```
 6. **Upstash.** Create a Redis database (region close to `gru1`). Copy the REST URL and token.
-7. **hCaptcha.** Create a site for `flag.ar`. Copy the site key and secret.
-8. **Vercel.** Import the repo. Set every variable from `.env.example`. Add the domain `flag.ar`.
+7. **Vercel.** Import the repo. Set every variable from `.env.example`. Add the domain `flag.ar`.
    Region is `gru1` (see `vercel.json`). The daily cron is in `vercel.json`.
-9. **Vercel Firewall** (dashboard, 3 custom rules on Hobby):
+8. **Vercel Firewall** (dashboard, 3 custom rules on Hobby):
    - Rate limit: path equals `/api/upload`, method POST, 20 requests per 60 s per IP, action deny.
      This is a coarse guard. The route enforces the real limits.
    - Admin geo rule: path starts with `/admin` or `/api/admin`, and country is not `AR` and IP is not
      `<your IP>`: deny.
    - Spare.
-10. **Slack.** Create an incoming webhook and set `SLACK_WEBHOOK_URL`.
+9. **Slack.** Create an incoming webhook and set `SLACK_WEBHOOK_URL`.
 11. **Check.** `curl -I https://flag.ar/files/manifest.json` twice. The second reply must show
     `x-vercel-cache: HIT`. This answers the spec's open question about the CDN.
 

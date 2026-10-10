@@ -24,17 +24,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const { email, password, captcha } = (await req.json().catch(() => ({}))) as Record<string, string>;
+  const { email, password } = (await req.json().catch(() => ({}))) as Record<string, string>;
   if (!email || !password || email.length > 320 || password.length > 1024) {
     return Response.json({ message: "Sign-in failed." }, { status: 400 });
   }
 
   const db = await sessionClient();
-  const { data, error } = await db.auth.signInWithPassword({
-    email,
-    password,
-    options: { captchaToken: captcha || undefined },
-  });
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
   if (error || !data.session) {
     await recordFailure("admin-login", key, WINDOW_S);
     return Response.json({ message: "Sign-in failed." }, { status: 401 });
