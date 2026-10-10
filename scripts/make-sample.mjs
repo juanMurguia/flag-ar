@@ -12,6 +12,16 @@ const NAMES = [
 ];
 const COLORS = ["#1d3557", "#e63946", "#2a9d8f", "#f4a261", "#6a4c93", "#264653", "#d62828", "#0077b6"];
 
+// Sample profiles for the startup flag view: category, location, one-line pitch.
+const PROFILES = [
+  ["Fintech", "Buenos Aires", "Financial infrastructure for Latin American companies."],
+  ["Payments", "Córdoba", "Instant QR payments for small shops across Argentina."],
+  ["AI", "Mendoza", "Language models tuned for Spanish-speaking businesses."],
+  ["Data", "Rosario", "Analytics pipelines that teams set up in an afternoon."],
+  ["Cloud", "Buenos Aires", "Managed hosting with data centers in the Southern Cone."],
+  ["DevOps", "La Plata", "Deploys and on-call tooling for small engineering teams."],
+];
+
 await mkdir(OUT, { recursive: true });
 const logos = [];
 for (const [i, name] of NAMES.entries()) {
@@ -29,7 +39,12 @@ for (const [i, name] of NAMES.entries()) {
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   await writeFile(new URL(`${id}.png`, OUT), png);
   const domain = `${name.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "")}.com.ar`;
-  logos.push({ id, domain, url: `https://${domain}/`, image: `${id}.png` });
+  const [category, city, description] = PROFILES[i % PROFILES.length];
+  logos.push({
+    id, domain, url: `https://${domain}/`, image: `${id}.png`,
+    name, description, category, location: `${city}, Argentina`,
+    socialLinks: [{ label: "LinkedIn", url: `https://www.linkedin.com/company/${domain.split(".")[0]}` }],
+  });
 }
 await writeFile(
   new URL("manifest.json", OUT),

@@ -21,6 +21,12 @@ export interface ManifestLogo {
   domain: string;
   url: string;
   image: string; // file name inside /files/
+  // Optional profile for the startup flag view. Missing fields fall back to the domain.
+  name?: string;
+  description?: string;
+  category?: string;
+  location?: string;
+  socialLinks?: { label: string; url: string }[];
 }
 
 export interface Manifest {

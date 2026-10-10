@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Manifest, ManifestLogo } from "@/lib/flag/layout";
 import { MAX_LOGOS } from "@/lib/flag/layout";
+import { toStartup } from "@/lib/flag/startup";
 import UploadDialog from "./UploadDialog";
+import StartupDetails from "./StartupDetails";
 import StillFlag from "./StillFlag";
 import Icon from "./Icon";
 
@@ -13,12 +15,11 @@ type SceneHandle = import("@/lib/flag/scene").FlagScene;
 
 export default function FlagApp() {
   const holder = useRef<HTMLDivElement>(null);
-  const toolbar = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneHandle | null>(null);
   const [logos, setLogos] = useState<ManifestLogo[]>([]);
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [solo, setSolo] = useState(false);
   const [wind, setWind] = useState(1);
   const [paused, setPaused] = useState(false);
   const [frame, setFrame] = useState(0);
@@ -39,7 +40,10 @@ export default function FlagApp() {
       }
       setWebgl(true);
       scene = new mod.FlagScene(holder.current, {
-        onSelect: (i) => setSelected(i),
+        // A tap on a logo opens its startup. A tap elsewhere does nothing: "Back to Argentina" closes.
+        onSelect: (i) => {
+          if (i !== null) setSelected(i);
+        },
         onTogglePause: () => togglePauseRef.current(),
       });
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -69,14 +73,14 @@ export default function FlagApp() {
     return () => cancelAnimationFrame(id);
   }, [logos, webgl]);
 
-  useEffect(() => {
-    sceneRef.current?.setSolo(solo && selected !== null ? selected : null);
-  }, [solo, selected]);
+  const logo = selected !== null ? logos[selected] ?? null : null;
+  const startup = useMemo(() => (logo ? toStartup(logo, FILES_BASE) : null), [logo]);
 
-  const close = useCallback(() => {
-    setSelected(null);
-    setSolo(false);
-  }, []);
+  useEffect(() => {
+    sceneRef.current?.showStartup(startup);
+  }, [startup, webgl]);
+
+  const close = useCallback(() => setSelected(null), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -86,9 +90,9 @@ export default function FlagApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [close, uploadOpen]);
 
-  // Keep the flag clear of the toolbar: tell the scene how much of the bottom it covers.
+  // Keep the flags clear of the bottom UI (startup details and toolbar): tell the scene how much it covers.
   useEffect(() => {
-    const bar = toolbar.current;
+    const bar = dock.current;
     if (!webgl || !bar) return;
     const update = () => {
       const top = bar.getBoundingClientRect().top;
@@ -103,8 +107,6 @@ export default function FlagApp() {
       window.removeEventListener("resize", update);
     };
   }, [webgl]);
-
-  const logo = selected !== null ? logos[selected] : null;
 
   // Pause freezes the cloth. While paused, the slider moves through the last 6 seconds of frames.
   const togglePause = useCallback(() => {
@@ -131,7 +133,7 @@ export default function FlagApp() {
       const blob = await sceneRef.current.capture();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = solo && logo ? `argentina-${logo.domain}.png` : "flag-ar.png";
+      a.download = startup ? `argentina-${startup.domain}.png` : "flag-ar.png";
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     } finally {
@@ -145,87 +147,74 @@ export default function FlagApp() {
       <div ref={holder} className="flag-holder" />
       {webgl === false && <StillFlag logos={logos} filesBase={FILES_BASE} />}
 
-      {logo && (
-        <section className="card" aria-label={`Brand: ${logo.domain}`}>
-          <p className="card-domain">{logo.domain}</p>
-          <div className="card-actions">
-            <a
-              className="btn primary icon" href={logo.url} target="_blank" rel="noopener noreferrer nofollow"
-              aria-label={`Visit ${logo.domain}`} title="Visit site"
-            >
-              <Icon name="external" />
-            </a>
-            {webgl && selected !== null && selected < MAX_LOGOS && (
-              <button className={`btn labeled${solo ? " on" : ""}`} onClick={() => setSolo((v) => !v)}>
-                <Icon name={solo ? "grid" : "focus"} size={16} />
-                {solo ? "Show all logos" : "Show only this logo"}
-              </button>
-            )}
-            <button className="btn ghost icon" onClick={close} aria-label="Close" title="Close">
-              <Icon name="close" />
-            </button>
-          </div>
-        </section>
+      {startup && (
+        <button className="back" onClick={close}>
+          <Icon name="back" size={16} />
+          Back to Argentina
+        </button>
       )}
 
-      <div className="toolbar" ref={toolbar}>
-        {webgl && (
+      <div className={`dock${startup ? " open" : ""}`} ref={dock}>
+        {startup && <StartupDetails startup={startup} />}
+        <div className="toolbar">
+          {webgl && (
+            <button
+              className="btn icon" onClick={togglePause} aria-pressed={paused}
+              aria-label={paused ? "Play wind" : "Pause wind"} title={paused ? "Play (Space)" : "Pause (Space)"}
+            >
+              <Icon name={paused ? "play" : "pause"} />
+            </button>
+          )}
+          {webgl && !paused && (
+            <label className="slider" title="Wind strength">
+              <Icon name="wind" size={15} />
+              <input
+                type="range" min={0} max={2} step={0.05} value={wind} aria-label="Wind strength"
+                onChange={(e) => {
+                  const w = Number(e.target.value);
+                  setWind(w);
+                  sceneRef.current?.setWind(w);
+                }}
+              />
+            </label>
+          )}
+          {webgl && paused && (
+            <label className="slider" title="Pick a frame">
+              <Icon name="frames" size={15} />
+              <input
+                type="range" min={0} max={Math.max(0, frameCount - 1)} step={1} value={frame}
+                aria-label="Frame" aria-valuetext={`Frame ${frame + 1} of ${frameCount}`}
+                onChange={(e) => {
+                  const i = Number(e.target.value);
+                  setFrame(i);
+                  sceneRef.current?.showFrame(i);
+                }}
+              />
+            </label>
+          )}
+          {webgl && (
+            <button
+              className="btn ghost icon" onClick={() => sceneRef.current?.resetView()}
+              aria-label="Reset view" title="Reset view"
+            >
+              <Icon name="reset" />
+            </button>
+          )}
+          {webgl && (
+            <button
+              className="btn ghost icon" onClick={capture} disabled={busy} aria-busy={busy}
+              aria-label="Download screenshot" title="Download screenshot"
+            >
+              <Icon name="camera" />
+            </button>
+          )}
           <button
-            className="btn icon" onClick={togglePause} aria-pressed={paused}
-            aria-label={paused ? "Play wind" : "Pause wind"} title={paused ? "Play (Space)" : "Pause (Space)"}
+            className="btn primary icon" onClick={() => setUploadOpen(true)}
+            aria-label="Add your logo" title="Add your logo"
           >
-            <Icon name={paused ? "play" : "pause"} />
+            <Icon name="plus" />
           </button>
-        )}
-        {webgl && !paused && (
-          <label className="slider" title="Wind strength">
-            <Icon name="wind" size={15} />
-            <input
-              type="range" min={0} max={2} step={0.05} value={wind} aria-label="Wind strength"
-              onChange={(e) => {
-                const w = Number(e.target.value);
-                setWind(w);
-                sceneRef.current?.setWind(w);
-              }}
-            />
-          </label>
-        )}
-        {webgl && paused && (
-          <label className="slider" title="Pick a frame">
-            <Icon name="frames" size={15} />
-            <input
-              type="range" min={0} max={Math.max(0, frameCount - 1)} step={1} value={frame}
-              aria-label="Frame" aria-valuetext={`Frame ${frame + 1} of ${frameCount}`}
-              onChange={(e) => {
-                const i = Number(e.target.value);
-                setFrame(i);
-                sceneRef.current?.showFrame(i);
-              }}
-            />
-          </label>
-        )}
-        {webgl && (
-          <button
-            className="btn ghost icon" onClick={() => sceneRef.current?.resetView()}
-            aria-label="Reset view" title="Reset view"
-          >
-            <Icon name="reset" />
-          </button>
-        )}
-        {webgl && (
-          <button
-            className="btn ghost icon" onClick={capture} disabled={busy} aria-busy={busy}
-            aria-label="Download screenshot" title="Download screenshot"
-          >
-            <Icon name="camera" />
-          </button>
-        )}
-        <button
-          className="btn primary icon" onClick={() => setUploadOpen(true)}
-          aria-label="Add your logo" title="Add your logo"
-        >
-          <Icon name="plus" />
-        </button>
+        </div>
       </div>
 
       {/* Brand list for screen readers and keyboard users. Shown on focus. */}
@@ -233,9 +222,9 @@ export default function FlagApp() {
         <ul>
           {logos.map((l, i) => (
             <li key={l.id}>
-              <a href={l.url} target="_blank" rel="noopener noreferrer nofollow" onFocus={() => setSelected(i)}>
+              <button type="button" onClick={() => setSelected(i)} aria-current={selected === i || undefined}>
                 {l.domain}
-              </a>
+              </button>
             </li>
           ))}
         </ul>

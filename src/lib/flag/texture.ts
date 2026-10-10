@@ -2,8 +2,34 @@
 import {
   COLORS, LAYOUT_H, LAYOUT_W, PATCH_SIZE, SOLO_PATCH, SUN, TEX_SCALE, patchSlots,
 } from "./layout";
+import {
+  accentColor, hexToRgb, isLightLogo, pickBrandColor, recolor, removeSolidBackground, visibleBounds,
+} from "./startup";
 
 export type LogoImage = CanvasImageSource & { width: number; height: number };
+
+const PATCH_LIGHT = "#FBFBF8";
+const PATCH_DARK = "#1F2433";
+
+// One pixel read per logo. The texture redraws often, the answer never changes.
+const lightCache = new WeakMap<object, boolean>();
+function needsDarkPatch(img: LogoImage): boolean {
+  let v = lightCache.get(img);
+  if (v === undefined) {
+    try {
+      const size = 48;
+      const c = createCanvas(size, size);
+      const ctx = c.getContext("2d", { willReadFrequently: true })!;
+      // Stretch to fill: only alpha and lightness matter here, not the shape.
+      ctx.drawImage(img, 0, 0, size, size);
+      v = isLightLogo(ctx.getImageData(0, 0, size, size).data);
+    } catch {
+      v = false;
+    }
+    lightCache.set(img, v);
+  }
+  return v;
+}
 
 export interface DrawOptions {
   logos: (LogoImage | null)[]; // in slot order; null = still loading
@@ -51,6 +77,90 @@ export function drawFlag(canvas: HTMLCanvasElement, opts: DrawOptions): void {
     ctx.globalCompositeOperation = "multiply";
     ctx.drawImage(opts.weave, 0, 0, canvas.width, canvas.height);
     ctx.restore();
+  }
+}
+
+export interface StartupFlagOptions {
+  logo: LogoImage | null; // null = still loading
+  accent: string | null; // brand color stripe at the hoist; null = plain white flag
+  weave?: HTMLCanvasElement | null;
+}
+
+/** Accent stripe width at the hoist, in layout units. */
+export const STARTUP_ACCENT = 72;
+const STARTUP_CLOTH = "#FAFAF7"; // white, a touch warm, so it reads as cloth and not as a blank screen
+const STARTUP_INK = "#1F2433"; // for a light mark that would vanish on white
+
+/**
+ * A startup's flag: white cloth, the logo printed in the middle, and a brand color stripe at the hoist.
+ * The logo is printed straight on the cloth, with no panel, so it must be a clean mark (see prepareLogo).
+ */
+export function drawStartupFlag(canvas: HTMLCanvasElement, opts: StartupFlagOptions): void {
+  const ctx = canvas.getContext("2d")!;
+  const s = canvas.width / LAYOUT_W;
+  ctx.save();
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+
+  ctx.fillStyle = STARTUP_CLOTH;
+  ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
+  const left = opts.accent ? STARTUP_ACCENT : 0;
+  if (opts.accent) {
+    ctx.fillStyle = opts.accent;
+    ctx.fillRect(0, 0, STARTUP_ACCENT, LAYOUT_H);
+  }
+  drawHem(ctx);
+
+  const img = opts.logo;
+  if (img && img.width > 0 && img.height > 0) {
+    // Fit inside a box that leaves wide margins: the cloth folds most near the edges.
+    const boxW = (LAYOUT_W - left) * 0.52, boxH = LAYOUT_H * 0.42;
+    const k = Math.min(boxW / img.width, boxH / img.height);
+    const dw = img.width * k, dh = img.height * k;
+    const cx = left + (LAYOUT_W - left) / 2;
+    ctx.drawImage(img, cx - dw / 2, LAYOUT_H / 2 - dh / 2, dw, dh);
+  }
+  ctx.restore();
+
+  if (opts.weave) {
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.drawImage(opts.weave, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+}
+
+/** Longest side of the cleaned logo, in pixels. The flag prints it at about 1600 px at most. */
+const LOGO_MAX = 1024;
+
+/**
+ * Cleans an uploaded logo for the white flag and finds its accent color:
+ * 1. A solid box behind the mark (JPEG, opaque PNG) becomes transparent.
+ * 2. A light mark (a white wordmark) is repainted dark, or it would vanish on white.
+ * 3. Empty padding is trimmed, so every logo prints at the same visual size.
+ * When the pixels cannot be read (cross-origin image without CORS), returns the image as is.
+ */
+export function prepareLogo(img: LogoImage): { logo: LogoImage; accent: string | null } {
+  try {
+    const k = Math.min(1, LOGO_MAX / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
+    const c = createCanvas(w, h);
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h);
+    const px = data.data;
+
+    removeSolidBackground(px, w, h);
+    const accent = accentColor(pickBrandColor(px));
+    if (isLightLogo(px)) recolor(px, hexToRgb(accent ?? STARTUP_INK));
+    ctx.putImageData(data, 0, 0);
+
+    const b = visibleBounds(px, w, h);
+    if (!b) return { logo: img, accent };
+    const out = createCanvas(b.w, b.h);
+    out.getContext("2d")!.drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+    return { logo: out, accent };
+  } catch {
+    return { logo: img, accent: null }; // tainted canvas
   }
 }
 
@@ -172,23 +282,25 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 function drawPatch(
-  ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, img: LogoImage | null,
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, img: LogoImage | null, radius = 9,
 ) {
   const x = cx - w / 2, y = cy - h / 2;
+  const inset = Math.max(6, radius * 0.6);
+  const dark = !!img && img.width > 0 && needsDarkPatch(img);
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.22)";
   ctx.shadowBlur = 3;
   ctx.shadowOffsetY = 1;
-  ctx.fillStyle = "#FBFBF8";
-  roundRect(ctx, x, y, w, h, 9);
+  ctx.fillStyle = dark ? PATCH_DARK : PATCH_LIGHT;
+  roundRect(ctx, x, y, w, h, radius);
   ctx.fill();
   ctx.restore();
 
   ctx.save();
   ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = "rgba(60,60,70,0.35)";
+  ctx.strokeStyle = dark ? "rgba(255,255,255,0.3)" : "rgba(60,60,70,0.35)";
   ctx.lineWidth = 0.9;
-  roundRect(ctx, x + 6, y + 6, w - 12, h - 12, 5);
+  roundRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2, radius * 0.55);
   ctx.stroke();
   ctx.restore();
 

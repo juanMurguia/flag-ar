@@ -6,121 +6,321 @@
       "id": "e96f60e2-4e09-4b54-ab98-0d9fe05c87c0",
       "domain": "pampalabs.com.ar",
       "url": "https://pampalabs.com.ar/",
-      "image": "e96f60e2-4e09-4b54-ab98-0d9fe05c87c0.png"
+      "image": "e96f60e2-4e09-4b54-ab98-0d9fe05c87c0.png",
+      "name": "Pampa Labs",
+      "description": "Financial infrastructure for Latin American companies.",
+      "category": "Fintech",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/pampalabs"
+        }
+      ]
     },
     {
       "id": "ef656c80-f2a7-45f1-984d-1f227d3f0875",
       "domain": "matepay.com.ar",
       "url": "https://matepay.com.ar/",
-      "image": "ef656c80-f2a7-45f1-984d-1f227d3f0875.png"
+      "image": "ef656c80-f2a7-45f1-984d-1f227d3f0875.png",
+      "name": "Mate Pay",
+      "description": "Instant QR payments for small shops across Argentina.",
+      "category": "Payments",
+      "location": "Córdoba, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/matepay"
+        }
+      ]
     },
     {
       "id": "3d2e2309-1184-48aa-841a-e3c360d1f775",
       "domain": "andesai.com.ar",
       "url": "https://andesai.com.ar/",
-      "image": "3d2e2309-1184-48aa-841a-e3c360d1f775.png"
+      "image": "3d2e2309-1184-48aa-841a-e3c360d1f775.png",
+      "name": "Andes AI",
+      "description": "Language models tuned for Spanish-speaking businesses.",
+      "category": "AI",
+      "location": "Mendoza, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/andesai"
+        }
+      ]
     },
     {
       "id": "5a74fd7a-34d7-4015-98d6-cd1b4717b538",
       "domain": "tangodata.com.ar",
       "url": "https://tangodata.com.ar/",
-      "image": "5a74fd7a-34d7-4015-98d6-cd1b4717b538.png"
+      "image": "5a74fd7a-34d7-4015-98d6-cd1b4717b538.png",
+      "name": "Tango Data",
+      "description": "Analytics pipelines that teams set up in an afternoon.",
+      "category": "Data",
+      "location": "Rosario, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/tangodata"
+        }
+      ]
     },
     {
       "id": "8c2156b8-f20c-4c46-8707-47fd0e782ece",
       "domain": "nanducloud.com.ar",
       "url": "https://nanducloud.com.ar/",
-      "image": "8c2156b8-f20c-4c46-8707-47fd0e782ece.png"
+      "image": "8c2156b8-f20c-4c46-8707-47fd0e782ece.png",
+      "name": "Ñandú Cloud",
+      "description": "Managed hosting with data centers in the Southern Cone.",
+      "category": "Cloud",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/nanducloud"
+        }
+      ]
     },
     {
       "id": "1d5dd449-e484-4098-b786-10cc627466b2",
       "domain": "asadoops.com.ar",
       "url": "https://asadoops.com.ar/",
-      "image": "1d5dd449-e484-4098-b786-10cc627466b2.png"
+      "image": "1d5dd449-e484-4098-b786-10cc627466b2.png",
+      "name": "Asado Ops",
+      "description": "Deploys and on-call tooling for small engineering teams.",
+      "category": "DevOps",
+      "location": "La Plata, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/asadoops"
+        }
+      ]
     },
     {
       "id": "b4c7b78b-9d2c-4fe5-8e44-fe0e696f41c2",
       "domain": "gauchobank.com.ar",
       "url": "https://gauchobank.com.ar/",
-      "image": "b4c7b78b-9d2c-4fe5-8e44-fe0e696f41c2.png"
+      "image": "b4c7b78b-9d2c-4fe5-8e44-fe0e696f41c2.png",
+      "name": "Gaucho Bank",
+      "description": "Financial infrastructure for Latin American companies.",
+      "category": "Fintech",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/gauchobank"
+        }
+      ]
     },
     {
       "id": "9c2ae1cc-ab7c-4a0d-b368-517339e6463e",
       "domain": "ruta40.com.ar",
       "url": "https://ruta40.com.ar/",
-      "image": "9c2ae1cc-ab7c-4a0d-b368-517339e6463e.png"
+      "image": "9c2ae1cc-ab7c-4a0d-b368-517339e6463e.png",
+      "name": "Ruta 40",
+      "description": "Instant QR payments for small shops across Argentina.",
+      "category": "Payments",
+      "location": "Córdoba, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/ruta40"
+        }
+      ]
     },
     {
       "id": "5c28a675-56a9-475c-8036-6dbee4e174b2",
       "domain": "malbecml.com.ar",
       "url": "https://malbecml.com.ar/",
-      "image": "5c28a675-56a9-475c-8036-6dbee4e174b2.png"
+      "image": "5c28a675-56a9-475c-8036-6dbee4e174b2.png",
+      "name": "Malbec ML",
+      "description": "Language models tuned for Spanish-speaking businesses.",
+      "category": "AI",
+      "location": "Mendoza, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/malbecml"
+        }
+      ]
     },
     {
       "id": "9bb98691-54a1-4a00-aafb-0e3a2f260ade",
       "domain": "patagoniadev.com.ar",
       "url": "https://patagoniadev.com.ar/",
-      "image": "9bb98691-54a1-4a00-aafb-0e3a2f260ade.png"
+      "image": "9bb98691-54a1-4a00-aafb-0e3a2f260ade.png",
+      "name": "Patagonia Dev",
+      "description": "Analytics pipelines that teams set up in an afternoon.",
+      "category": "Data",
+      "location": "Rosario, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/patagoniadev"
+        }
+      ]
     },
     {
       "id": "a6144223-9918-4eb4-ad8e-331c8bf1bec3",
       "domain": "obelisco.com.ar",
       "url": "https://obelisco.com.ar/",
-      "image": "a6144223-9918-4eb4-ad8e-331c8bf1bec3.png"
+      "image": "a6144223-9918-4eb4-ad8e-331c8bf1bec3.png",
+      "name": "Obelisco",
+      "description": "Managed hosting with data centers in the Southern Cone.",
+      "category": "Cloud",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/obelisco"
+        }
+      ]
     },
     {
       "id": "4073286f-280a-4742-91d2-71f6fcef840d",
       "domain": "dulcestack.com.ar",
       "url": "https://dulcestack.com.ar/",
-      "image": "4073286f-280a-4742-91d2-71f6fcef840d.png"
+      "image": "4073286f-280a-4742-91d2-71f6fcef840d.png",
+      "name": "Dulce Stack",
+      "description": "Deploys and on-call tooling for small engineering teams.",
+      "category": "DevOps",
+      "location": "La Plata, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/dulcestack"
+        }
+      ]
     },
     {
       "id": "cfa4c0df-3c0b-49ea-956e-a1a68d30612a",
       "domain": "fernetfin.com.ar",
       "url": "https://fernetfin.com.ar/",
-      "image": "cfa4c0df-3c0b-49ea-956e-a1a68d30612a.png"
+      "image": "cfa4c0df-3c0b-49ea-956e-a1a68d30612a.png",
+      "name": "Fernet Fin",
+      "description": "Financial infrastructure for Latin American companies.",
+      "category": "Fintech",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/fernetfin"
+        }
+      ]
     },
     {
       "id": "d16e4eb3-0147-4d1f-899b-a2b5ba5c636f",
       "domain": "glaciar.com.ar",
       "url": "https://glaciar.com.ar/",
-      "image": "d16e4eb3-0147-4d1f-899b-a2b5ba5c636f.png"
+      "image": "d16e4eb3-0147-4d1f-899b-a2b5ba5c636f.png",
+      "name": "Glaciar",
+      "description": "Instant QR payments for small shops across Argentina.",
+      "category": "Payments",
+      "location": "Córdoba, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/glaciar"
+        }
+      ]
     },
     {
       "id": "6c9b759b-b61f-4ae7-8c90-0c2c8847d478",
       "domain": "puertologs.com.ar",
       "url": "https://puertologs.com.ar/",
-      "image": "6c9b759b-b61f-4ae7-8c90-0c2c8847d478.png"
+      "image": "6c9b759b-b61f-4ae7-8c90-0c2c8847d478.png",
+      "name": "Puerto Logs",
+      "description": "Language models tuned for Spanish-speaking businesses.",
+      "category": "AI",
+      "location": "Mendoza, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/puertologs"
+        }
+      ]
     },
     {
       "id": "8a0acbc7-07cc-451f-8308-66e7e7c8c6fb",
       "domain": "condorsec.com.ar",
       "url": "https://condorsec.com.ar/",
-      "image": "8a0acbc7-07cc-451f-8308-66e7e7c8c6fb.png"
+      "image": "8a0acbc7-07cc-451f-8308-66e7e7c8c6fb.png",
+      "name": "Cóndor Sec",
+      "description": "Analytics pipelines that teams set up in an afternoon.",
+      "category": "Data",
+      "location": "Rosario, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/condorsec"
+        }
+      ]
     },
     {
       "id": "96f1ce76-edfb-4d00-ba4b-419770036b96",
       "domain": "yerbahealth.com.ar",
       "url": "https://yerbahealth.com.ar/",
-      "image": "96f1ce76-edfb-4d00-ba4b-419770036b96.png"
+      "image": "96f1ce76-edfb-4d00-ba4b-419770036b96.png",
+      "name": "Yerba Health",
+      "description": "Managed hosting with data centers in the Southern Cone.",
+      "category": "Cloud",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/yerbahealth"
+        }
+      ]
     },
     {
       "id": "b3f46835-c139-4f75-a3ec-e4d5b73deab5",
       "domain": "piberobotics.com.ar",
       "url": "https://piberobotics.com.ar/",
-      "image": "b3f46835-c139-4f75-a3ec-e4d5b73deab5.png"
+      "image": "b3f46835-c139-4f75-a3ec-e4d5b73deab5.png",
+      "name": "Pibe Robotics",
+      "description": "Deploys and on-call tooling for small engineering teams.",
+      "category": "DevOps",
+      "location": "La Plata, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/piberobotics"
+        }
+      ]
     },
     {
       "id": "33597723-8d14-4efe-aa5d-0dcea53743c1",
       "domain": "quebrada.com.ar",
       "url": "https://quebrada.com.ar/",
-      "image": "33597723-8d14-4efe-aa5d-0dcea53743c1.png"
+      "image": "33597723-8d14-4efe-aa5d-0dcea53743c1.png",
+      "name": "Quebrada",
+      "description": "Financial infrastructure for Latin American companies.",
+      "category": "Fintech",
+      "location": "Buenos Aires, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/quebrada"
+        }
+      ]
     },
     {
       "id": "868f4ab0-10ed-404c-a472-45cb25cbcbe0",
       "domain": "bandoneon.com.ar",
       "url": "https://bandoneon.com.ar/",
-      "image": "868f4ab0-10ed-404c-a472-45cb25cbcbe0.png"
+      "image": "868f4ab0-10ed-404c-a472-45cb25cbcbe0.png",
+      "name": "Bandoneón",
+      "description": "Instant QR payments for small shops across Argentina.",
+      "category": "Payments",
+      "location": "Córdoba, Argentina",
+      "socialLinks": [
+        {
+          "label": "LinkedIn",
+          "url": "https://www.linkedin.com/company/bandoneon"
+        }
+      ]
     }
   ]
 }
