@@ -15,8 +15,9 @@ export const env = {
   serviceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),
   ipHashSalt: () => required("IP_HASH_SALT"),
   cronSecret: () => required("CRON_SECRET"),
-  upstashUrl: () => process.env.UPSTASH_REDIS_REST_URL,
-  upstashToken: () => process.env.UPSTASH_REDIS_REST_TOKEN,
+  // The Vercel Marketplace integration names these KV_REST_API_*.
+  upstashUrl: () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
+  upstashToken: () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
   slackWebhook: () => process.env.SLACK_WEBHOOK_URL,
   /** Comma-separated list of origins allowed to POST to /api/upload. */
   allowedOrigins: () =>
