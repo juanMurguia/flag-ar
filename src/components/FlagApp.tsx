@@ -1,236 +1,57 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Manifest, ManifestLogo } from "@/lib/flag/layout";
-import { MAX_LOGOS } from "@/lib/flag/layout";
-import { toStartup } from "@/lib/flag/startup";
-import UploadDialog from "./UploadDialog";
-import StartupDetails from "./StartupDetails";
-import StillFlag from "./StillFlag";
+import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
+import HoistPanel from "./HoistPanel";
+import Toolbar, { usePause } from "./Toolbar";
+import { useDockInset, usePairScene } from "./usePairScene";
 import Icon from "./Icon";
 
-const FILES_BASE = process.env.NEXT_PUBLIC_FILES_BASE || "/files";
-
-type SceneHandle = import("@/lib/flag/scene").FlagScene;
-
+/** /izar: the Argentine flag and a second pole that previews yours while the hoist panel fills in. */
 export default function FlagApp() {
   const holder = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<SceneHandle | null>(null);
-  const [logos, setLogos] = useState<ManifestLogo[]>([]);
-  const [webgl, setWebgl] = useState<boolean | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [wind, setWind] = useState(1);
-  const [paused, setPaused] = useState(false);
-  const [frame, setFrame] = useState(0);
-  const [frameCount, setFrameCount] = useState(0);
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  // Scene
-  useEffect(() => {
-    let scene: SceneHandle | null = null;
-    let cancelled = false;
-    (async () => {
-      const mod = await import("@/lib/flag/scene");
-      if (cancelled) return;
-      if (!mod.supportsWebGL2() || !holder.current) {
-        setWebgl(false);
-        return;
-      }
-      setWebgl(true);
-      scene = new mod.FlagScene(holder.current, {
-        // A tap on a logo opens its startup. A tap elsewhere does nothing: "Back to Argentina" closes.
-        onSelect: (i) => {
-          if (i !== null) setSelected(i);
-        },
-        onTogglePause: () => togglePauseRef.current(),
-      });
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        scene.setWind(0.3);
-        setWind(0.3);
-      }
-      sceneRef.current = scene;
-    })();
-    return () => {
-      cancelled = true;
-      scene?.dispose();
-      sceneRef.current = null;
-    };
-  }, []);
-
-  // Manifest
-  useEffect(() => {
-    fetch(`${FILES_BASE}/manifest.json`)
-      .then((r) => (r.ok ? (r.json() as Promise<Manifest>) : null))
-      .then((m) => setLogos(Array.isArray(m?.logos) ? m!.logos : []))
-      .catch(() => setLogos([]));
-  }, []);
-
-  useEffect(() => {
-    // Logos load after the first frame.
-    const id = requestAnimationFrame(() => sceneRef.current?.setLogos(logos.slice(0, MAX_LOGOS), FILES_BASE));
-    return () => cancelAnimationFrame(id);
-  }, [logos, webgl]);
-
-  const logo = selected !== null ? logos[selected] ?? null : null;
-  const startup = useMemo(() => (logo ? toStartup(logo, FILES_BASE) : null), [logo]);
-
-  useEffect(() => {
-    sceneRef.current?.showStartup(startup);
-  }, [startup, webgl]);
-
-  const close = useCallback(() => setSelected(null), []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !uploadOpen) close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [close, uploadOpen]);
-
-  // Keep the flags clear of the bottom UI (startup details and toolbar): tell the scene how much it covers.
-  useEffect(() => {
-    const bar = dock.current;
-    if (!webgl || !bar) return;
-    const update = () => {
-      const top = bar.getBoundingClientRect().top;
-      sceneRef.current?.setInsetBottom(window.innerHeight - top + 8);
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(bar);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [webgl]);
-
-  // Pause freezes the cloth. While paused, the slider moves through the last 6 seconds of frames.
-  const togglePause = useCallback(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    if (scene.paused) {
-      scene.play();
-      setPaused(false);
-    } else {
-      const last = scene.pause();
-      setFrameCount(scene.frameCount);
-      setFrame(last);
-      setPaused(true);
-    }
-  }, []);
-  const togglePauseRef = useRef(togglePause);
+  const togglePauseRef = useRef<() => void>(() => {});
+  const { scene, webgl } = usePairScene(holder, () => togglePauseRef.current());
+  const { paused, togglePause } = usePause(scene);
   togglePauseRef.current = togglePause;
-
-  /** Saves exactly what the screen shows, with the flag.ar watermark. */
-  async function capture() {
-    if (!sceneRef.current) return;
-    setBusy(true);
-    try {
-      const blob = await sceneRef.current.capture();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = startup ? `argentina-${startup.domain}.png` : "flag-ar.png";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Every "+" in the site leads here, so the form opens at once. "+" in the dock reopens it after closing.
+  // "closing" keeps the sheet mounted while it slides out along its entry path.
+  const [panel, setPanel] = useState<"open" | "closing" | "closed">("open");
+  const panelOpen = panel !== "closed";
+  useDockInset(dock, scene, !!webgl, panelOpen);
+  // Keyboard closes (Escape) skip the exit animation: they repeat often and must feel instant.
+  const close = useCallback((instant?: boolean) => setPanel(instant ? "closed" : "closing"), []);
+  const closed = useCallback(() => setPanel((p) => (p === "closing" ? "closed" : p)), []);
 
   return (
-    <main className="stage">
-      <h1 className="sr-only">Argentine Startups Flag</h1>
+    <main className={`stage${panelOpen ? " with-sheet" : ""}`}>
+      <h1 className="sr-only">flag.ar: izá la bandera de tu startup al lado de la argentina</h1>
       <div ref={holder} className="flag-holder" />
-      {webgl === false && <StillFlag logos={logos} filesBase={FILES_BASE} />}
-
-      {startup && (
-        <button className="back" onClick={close}>
-          <Icon name="back" size={16} />
-          Back to Argentina
-        </button>
+      {webgl === false && (
+        <div className="still">
+          <p className="still-note">Tu navegador no puede mostrar la escena 3D.</p>
+        </div>
       )}
 
-      <div className={`dock${startup ? " open" : ""}`} ref={dock}>
-        {startup && <StartupDetails startup={startup} />}
-        <div className="toolbar">
-          {webgl && (
-            <button
-              className="btn icon" onClick={togglePause} aria-pressed={paused}
-              aria-label={paused ? "Play wind" : "Pause wind"} title={paused ? "Play (Space)" : "Pause (Space)"}
-            >
-              <Icon name={paused ? "play" : "pause"} />
-            </button>
-          )}
-          {webgl && !paused && (
-            <label className="slider" title="Wind strength">
-              <Icon name="wind" size={15} />
-              <input
-                type="range" min={0} max={2} step={0.05} value={wind} aria-label="Wind strength"
-                onChange={(e) => {
-                  const w = Number(e.target.value);
-                  setWind(w);
-                  sceneRef.current?.setWind(w);
-                }}
-              />
-            </label>
-          )}
-          {webgl && paused && (
-            <label className="slider" title="Pick a frame">
-              <Icon name="frames" size={15} />
-              <input
-                type="range" min={0} max={Math.max(0, frameCount - 1)} step={1} value={frame}
-                aria-label="Frame" aria-valuetext={`Frame ${frame + 1} of ${frameCount}`}
-                onChange={(e) => {
-                  const i = Number(e.target.value);
-                  setFrame(i);
-                  sceneRef.current?.showFrame(i);
-                }}
-              />
-            </label>
-          )}
-          {webgl && (
-            <button
-              className="btn ghost icon" onClick={() => sceneRef.current?.resetView()}
-              aria-label="Reset view" title="Reset view"
-            >
-              <Icon name="reset" />
-            </button>
-          )}
-          {webgl && (
-            <button
-              className="btn ghost icon" onClick={capture} disabled={busy} aria-busy={busy}
-              aria-label="Download screenshot" title="Download screenshot"
-            >
-              <Icon name="camera" />
-            </button>
-          )}
+      <Link className="corner-link" href="/" aria-label="Salón de la Fama" title="Salón de la Fama">
+        <Icon name="hall" size={15} />
+      </Link>
+
+      <div className="dock" ref={dock}>
+        <Toolbar scene={scene} webgl={webgl} paused={paused} togglePause={togglePause} fileName="flag-ar.png">
           <button
-            className="btn primary icon" onClick={() => setUploadOpen(true)}
-            aria-label="Add your logo" title="Add your logo"
+            className="btn ghost icon" onClick={() => setPanel("open")}
+            aria-label="Izar mi bandera" title="Izar mi bandera" aria-expanded={panel === "open"}
           >
             <Icon name="plus" />
           </button>
-        </div>
+        </Toolbar>
       </div>
 
-      {/* Brand list for screen readers and keyboard users. Shown on focus. */}
-      <nav className="brand-list" aria-label="Brands on the flag">
-        <ul>
-          {logos.map((l, i) => (
-            <li key={l.id}>
-              <button type="button" onClick={() => setSelected(i)} aria-current={selected === i || undefined}>
-                {l.domain}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
-
-      {uploadOpen && <UploadDialog onClose={() => setUploadOpen(false)} />}
+      {panelOpen && (
+        <HoistPanel scene={scene} webgl={webgl} closing={panel === "closing"} onClose={close} onClosed={closed} />
+      )}
     </main>
   );
 }

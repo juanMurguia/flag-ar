@@ -177,3 +177,38 @@ export function disposeSkyDome(dome: SkyDome) {
 export function setSkyTime(dome: SkyDome, seconds: number) {
   dome.material.uniforms.time.value = seconds;
 }
+
+/** Sunset studio for reflections (metal poles, cloth sheen): dusk gradient, a hot sun box, a pink fill. */
+export function buildSunsetEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const env = new THREE.Scene();
+  const skyGeo = new THREE.SphereGeometry(50, 32, 16);
+  const zenith = new THREE.Color(0x2c2c5c), horizon = new THREE.Color(0xf08a4e), ground = new THREE.Color(0x8a74a8);
+  const pos = skyGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 50;
+    const c = y >= 0
+      ? horizon.clone().lerp(zenith, THREE.MathUtils.smoothstep(y, 0, 0.7))
+      : horizon.clone().lerp(ground, THREE.MathUtils.smoothstep(-y, 0, 0.35));
+    colors.set([c.r, c.g, c.b], i * 3);
+  }
+  skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  env.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const box = (x: number, y: number, z: number, w: number, h: number, power: number, color: number) => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(power), side: THREE.DoubleSide }),
+    );
+    m.position.set(x, y, z);
+    m.lookAt(0, 0, 0);
+    env.add(m);
+  };
+  const sun = SUN_DIR.clone().multiplyScalar(22);
+  box(sun.x, sun.y + 1, sun.z, 14, 8, 5, 0xffa060);
+  box(12, 4, 16, 16, 10, 1.6, 0xffb48a);
+  box(-14, 12, 14, 14, 10, 0.7, 0xb9a6e0);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const tex = pmrem.fromScene(env, 0.04).texture;
+  pmrem.dispose();
+  return tex;
+}

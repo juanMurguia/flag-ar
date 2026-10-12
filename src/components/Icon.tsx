@@ -52,6 +52,37 @@ const PATHS = {
       <path d="M3 16h7" />
     </>
   ),
+  download: (
+    <>
+      <path d="M12 4v11M7 10l5 5 5-5" />
+      <path d="M5 20h14" />
+    </>
+  ),
+  video: (
+    <>
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path d="M16 10l5-3v10l-5-3z" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M20 20l-4.2-4.2" />
+    </>
+  ),
+  hall: (
+    <>
+      <path d="M5 21V4M12 21V3M19 21V4" />
+      <path d="M5 4h5v4H5zM12 3h6v4h-6zM19 4h0" />
+      <path d="M3 21h18" />
+    </>
+  ),
+  flag: (
+    <>
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </>
+  ),
   frames: (
     <>
       <rect x="3" y="5" width="18" height="14" rx="2" />

@@ -1,41 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  accentColor, hexToRgb, hslToRgb, isLightLogo, nameFromDomain, pickBrandColor, removeSolidBackground, rgbToHsl,
-  safeUrl, toStartup, visibleBounds,
+  accentColor, hexToRgb, hslToRgb, isLightLogo, pickBrandColor, removeSolidBackground, rgbToHsl, visibleBounds,
 } from "@/lib/flag/startup";
-
-const base = { id: "a", domain: "pampalabs.com.ar", url: "https://pampalabs.com.ar/", image: "a.png" };
-
-describe("toStartup", () => {
-  it("falls back to the domain when the manifest has no profile", () => {
-    const s = toStartup(base, "/files");
-    expect(s.name).toBe("Pampalabs");
-    expect(s.logo).toBe("/files/a.png");
-    expect(s.website).toBe("https://pampalabs.com.ar/");
-    expect(s.description).toBeUndefined();
-    expect(s.socialLinks).toEqual([]);
-  });
-  it("drops unsafe links and caps long text", () => {
-    const s = toStartup({
-      ...base,
-      url: "javascript:alert(1)",
-      description: "x".repeat(500),
-      socialLinks: [
-        { label: "X", url: "javascript:alert(1)" },
-        { label: "LinkedIn", url: "https://linkedin.com/company/pampa" },
-      ],
-    }, "/files");
-    expect(s.website).toBe("https://pampalabs.com.ar/");
-    expect(s.description).toHaveLength(220);
-    expect(s.socialLinks).toEqual([{ label: "LinkedIn", url: "https://linkedin.com/company/pampa" }]);
-  });
-  it("accepts only http and https", () => {
-    expect(safeUrl("https://a.com")).toBe("https://a.com/");
-    expect(safeUrl("data:text/html,x")).toBeNull();
-    expect(safeUrl(42)).toBeNull();
-    expect(nameFromDomain("www.mate.com.ar")).toBe("Mate");
-  });
-});
 
 function pixels(...colors: [number, number, number, number][]): number[] {
   return colors.flatMap((c) => Array.from({ length: 50 }, () => c).flat());

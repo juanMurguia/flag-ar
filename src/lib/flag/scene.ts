@@ -1,40 +1,50 @@
-// Three.js scene: renderer, lights, the Argentine flag, an optional startup flag beside it,
-// camera controls, picking, export.
+// Two poles at sunset: the Argentine flag (observer's right, higher: place of honor) and a startup's
+// flag beside it. Renderer, lights, camera orbit, hoist animation, still and video export.
 import * as THREE from "three";
-import { FLAG_HEIGHT, FLAG_WIDTH } from "./cloth";
-import { ClothFlag, type Grid } from "./clothFlag";
-import { hitLogo, uvToLayout, type ManifestLogo } from "./layout";
-import type { Startup } from "./startup";
-import { buildWeave, createCanvas, drawFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
+import { FlagStaff } from "./staff";
 import {
-  SUN_DIR, buildSkyDome, disposeSkyDome, setAuraFrom, setSkyTime, type SkyDome,
+  LAYOUT_H, LAYOUT_W, buildWeave, createCanvas, drawArgentineFlag, drawStartupFlag, type LogoImage,
+} from "./texture";
+import { LOOP_SECONDS, foldUniforms } from "./wave";
+import {
+  SUN_DIR, buildSkyDome, buildSunsetEnvironment, disposeSkyDome, setAuraFrom, setSkyTime, type SkyDome,
 } from "./sky";
 
+export const FLAG_WIDTH = 14;
+export const FLAG_HEIGHT = 9;
 const FOV = 32;
 const ZOOM_MIN = 0.45;
 const ZOOM_MAX = 1.5;
 const PITCH_LIMIT = 0.7;
-// Camera starts a little below the flag, looking up: hero angle, horizon in the lower third.
-const DEFAULT_PITCH = -0.2;
+const DEFAULT_PITCH = -0.16;
+const DEFAULT_YAW = 0.05;
 const EASE = 0.12;
-const TAP_SLOP = 6;
 const EXPORT_WIDTH = 2400;
-const FULL_GRID: Grid = { cols: 65, rows: 43, passes: 10 };
-export const PAGE_BACKGROUND = ["#6f62a3", "#d99aa6"] as const; // fallback only; the sky is drawn by WebGL
+export const HOIST_SECONDS = 2;
+const STARTUP_PHASE = 1.9; // radians: the two flags never move in step
 
-// Startup flag: same size as the Argentine flag, beside it on its fly side, in the same wind.
-const PAIR_GAP = 3.5;
-const STARTUP_X = FLAG_WIDTH + PAIR_GAP;
-const PAIR_WIDTH = FLAG_WIDTH * 2 + PAIR_GAP;
-// The pair view looks from a little to the right: the startup flag comes forward, Argentina recedes.
-const PAIR_YAW = 0.06;
-const CAMERA_SECONDS = 1.6;
-const HOIST_SECONDS = 1.5;
-const LOWER_SECONDS = 0.9;
-const HOIST_DROP = 26; // world units below its place: out of view
-const LOGO_TIMEOUT_MS = 2500; // hoist anyway if the logo is slow
-const MAIN_LABEL =
-  "Argentine flag waving in the wind, with startup logos. Drag or use the arrow keys to rotate. Use plus and minus to zoom. Press Space to pause.";
+// Poles. Argentina on the right (+x is the observer's right) and 0.8 higher.
+const AR_X = 1.5;
+const AR_TOP = 5.4;
+const SU_X = -FLAG_WIDTH - 2.5;
+const SU_TOP = 4.6;
+const POLE_LENGTH = 40;
+// Stacked layout (portrait screens): one shared pole, Argentina at the peak, the startup below it.
+// That is the real protocol when two flags fly on one halyard: the national flag goes on top.
+const STACK_GAP = 2;
+/** Free areas narrower than this (width / height) use the stacked layout. */
+const STACK_BELOW = 0.9;
+
+export type Layout = "side" | "stacked";
+
+interface Box { x0: number; x1: number; y0: number; y1: number }
+// Framing boxes around both flags and the finials.
+const BOXES: Record<Layout, Box> = {
+  side: { x0: SU_X - 0.6, x1: AR_X + FLAG_WIDTH + 0.3, y0: SU_TOP - FLAG_HEIGHT - 1.4, y1: AR_TOP + 1.3 },
+  stacked: { x0: -0.7, x1: FLAG_WIDTH + 0.6, y0: AR_TOP - FLAG_HEIGHT * 2 - STACK_GAP - 0.9, y1: AR_TOP + 1.3 },
+};
+
+export const PAGE_BACKGROUND = ["#6f62a3", "#d99aa6"] as const;
 
 export function supportsWebGL2(): boolean {
   try {
@@ -44,82 +54,82 @@ export function supportsWebGL2(): boolean {
   }
 }
 
-export interface FlagSceneEvents {
-  onSelect?: (index: number | null) => void;
-  /** Space on the focused flag. */
+export interface PairSceneEvents {
   onTogglePause?: () => void;
 }
 
-interface StartupEntry {
-  id: string;
-  flag: ClothFlag;
-  /** Hoist progress, 0 (lowered) to 1 (up). Starts below 0 to wait for a flag that is coming down. */
-  raise: number;
-  up: boolean;
-  ready: boolean; // logo loaded (or timed out): the flag can rise
-  logo: LogoImage | null;
-  accent: string | null;
+/** Free area of an export, in output pixels. The flags fit and center inside it. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
-export class FlagScene {
+function isMobile() {
+  return window.matchMedia?.("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 820;
+}
+
+export class PairScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
-  private group = new THREE.Group();
   private keyLight: THREE.DirectionalLight;
-  private argentina: ClothFlag;
-  private startups: StartupEntry[] = []; // the last one with up = true is the current one
-  private grid: Grid = { ...FULL_GRID };
-  private wind = 1;
-  private weave: { overlay: HTMLCanvasElement; normal: THREE.Texture } | null = null;
   private dome: SkyDome;
-  private skyTime = 0; // mist drift; stops with the wind
+  private argentina: FlagStaff;
+  private startup: FlagStaff;
+  private logo: LogoImage | null = null;
+  private bg = "#ffffff";
+  private hasStartup = false;
+  private weave: HTMLCanvasElement | null = null;
+  private normalMap: THREE.Texture | null = null;
 
-  private logos: ManifestLogo[] = [];
-  private images: (LogoImage | null)[] = [];
-  private soloIndex: number | null = null;
+  private time = 0;
+  private wind = 1;
+  private windShown = 1; // eased toward `wind`, so the slider never makes the cloth jump
+  private isPaused = false;
+  private pausedAt = 0;
+  private hoist = 0;
+  private hoistFrom = 0;
+  private hoistTarget = 0;
+  private hoistStart = 0;
+  private hoistDone: (() => void) | null = null;
+  private motionScale = 1;
 
-  // Pair view progress, 0 (Argentina alone) to 1 (Argentina and a startup). Eased for the camera.
-  private pair = 0;
-  private motionScale = 1; // reduced motion: transitions finish almost at once
-
-  // Camera orbit around the flag. The world (sun, lights, clouds) stays fixed, so rotating changes the light.
-  private yaw = 0; private pitch = DEFAULT_PITCH;
-  private targetYaw = 0; private targetPitch = DEFAULT_PITCH;
+  private yaw = DEFAULT_YAW; private pitch = DEFAULT_PITCH;
+  private targetYaw = DEFAULT_YAW; private targetPitch = DEFAULT_PITCH;
   private zoom = 1;
   private view = { w: 1, h: 1 };
   private insetBottom = 0;
   private insetTarget: number | null = null;
-  private pointers = new Map<number, { x: number; y: number; startX: number; startY: number }>();
+  private insetTop = 0;
+  private insetRight = 0;
+  private insetRightTarget = 0;
+  private pointers = new Map<number, { x: number; y: number }>();
   private pinchStart = 0;
   private zoomAtPinch = 1;
-  private moved = false;
-  private raycaster = new THREE.Raycaster();
-
-  private isPaused = false;
+  private recording = false;
 
   private raf = 0;
   private lastTime = 0;
-  private frames = 0;
-  private slowFrames = 0;
-  private quality = 0; // 0 full, 1 smaller grid, 2 fewer passes, 3 smaller shadows
   private resizeObserver: ResizeObserver;
   private disposed = false;
 
-  constructor(private container: HTMLElement, private events: FlagSceneEvents = {}) {
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  constructor(private container: HTMLElement, private events: PairSceneEvents = {}) {
+    const mobile = isMobile();
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+    // Phones: device pixel ratio at most 2, fewer cloth segments, smaller textures and shadows.
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
-    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer = renderer;
     const canvas = renderer.domElement;
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", MAIN_LABEL);
+    canvas.setAttribute("aria-label", "Bandera argentina flameando junto a un segundo mástil. Arrastrá para girar.");
     canvas.style.touchAction = "none";
     canvas.style.display = "block";
     canvas.style.width = "100%";
@@ -127,135 +137,97 @@ export class FlagScene {
     container.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 2000);
-    this.scene.add(this.group);
-    this.scene.environment = this.buildEnvironment();
+    this.scene.environment = buildSunsetEnvironment(renderer);
     this.dome = buildSkyDome(renderer);
     this.scene.add(this.dome);
 
-    // Key: warm light from the front right, long soft shadows. Keeps the logos readable.
-    const key = new THREE.DirectionalLight(0xffb27a, 1.55);
-    key.position.set(10, 3.2, 9);
+    const key = new THREE.DirectionalLight(0xffb27a, 1.5 * Math.PI); // three r155+ lights are physical: × π keeps the pre-r155 look
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048);
     const sc = key.shadow.camera as THREE.OrthographicCamera;
-    sc.left = -11; sc.right = 11; sc.top = 9; sc.bottom = -9; sc.near = 1; sc.far = 45;
+    sc.left = -20; sc.right = 20; sc.top = 12; sc.bottom = -12; sc.near = 1; sc.far = 60;
     key.shadow.bias = -0.0004;
     key.shadow.normalBias = 0.02;
     key.shadow.radius = 5;
+    key.shadow.intensity = 0.75; // folds shade each other, but sky light still reaches inside them
+    key.position.set(8, 4, 14);
     this.keyLight = key;
-    this.scene.add(key, key.target); // the target moves with the view, so it must be in the scene
-    // Sun: the same direction as the sun in the backdrop. From the default view it backlights the flag;
-    // orbit toward it and the cloth glows at the edges, orbit away and the front catches it.
-    const backLight = new THREE.DirectionalLight(0xffd2a0, 1.8);
+    this.scene.add(key, key.target);
+    const backLight = new THREE.DirectionalLight(0xffd2a0, 1.7 * Math.PI);
     backLight.position.copy(SUN_DIR).multiplyScalar(30);
     this.scene.add(backLight);
-    // Fill: indigo from above, lilac haze from below. Keeps shadows soft and colored, never black.
-    this.scene.add(new THREE.HemisphereLight(0x7a6aa8, 0x9a80b0, 0.35));
+    // Low fill: too much sky light washes the folds flat.
+    this.scene.add(new THREE.HemisphereLight(0x7a6aa8, 0x9a80b0, 0.3 * Math.PI));
+    this.scene.environmentIntensity = 0.7;
+    // Air between the camera and the poles: a thin warm haze lowers contrast with distance, so the
+    // shafts fade as they run down and away. The sky dome ignores fog.
+    this.scene.fog = new THREE.FogExp2(0xe6c2bd, 0.0042);
+    // Sun behind the flags: it shows through the cloth, and fold shading needs its direction.
+    const fold = foldUniforms(SUN_DIR, new THREE.Color(0xffc896), 0.32);
 
-    this.argentina = new ClothFlag(
-      (c, weave) => drawFlag(c, { logos: this.images, soloIndex: this.soloIndex, weave }),
-      this.grid, renderer.capabilities.getMaxAnisotropy(),
-    );
-    this.group.add(this.argentina.group);
+    const aniso = renderer.capabilities.getMaxAnisotropy();
+    const seg: [number, number] = mobile ? [40, 26] : [80, 52];
+    const tex: [number, number] = mobile ? [1400, 900] : [2048, 1317];
+    this.argentina = new FlagStaff({ width: FLAG_WIDTH, height: FLAG_HEIGHT, poleLength: POLE_LENGTH, segments: seg, texture: tex, anisotropy: aniso, fold });
+    this.argentina.setHoist(1);
+    this.startup = new FlagStaff({
+      width: FLAG_WIDTH, height: FLAG_HEIGHT, poleLength: POLE_LENGTH, segments: seg, texture: tex,
+      anisotropy: aniso, phase: STARTUP_PHASE, fold,
+    });
+    this.startup.setHoist(0);
+    this.scene.add(this.argentina.group, this.startup.group);
+    this.applyLayout("side");
+    this.argentina.paint((c) => drawArgentineFlag(c));
+    this.paintStartup();
+
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) this.motionScale = 20;
-
     this.resize();
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.bindInput(canvas);
-
-    if (process.env.NODE_ENV !== "production" && location.search.includes("debug")) (window as unknown as { __flag: unknown }).__flag = { self: this, THREE };
+    if (process.env.NODE_ENV !== "production" && location.search.includes("debug")) (window as unknown as { __pair: unknown }).__pair = this;
     this.lastTime = performance.now();
     this.raf = requestAnimationFrame(this.loop);
-    // Fabric detail arrives after the first frame, so the flag shows at once.
-    requestAnimationFrame(() => setTimeout(() => this.loadWeave(), 0));
+    // Fabric detail after the first frame, so the flags show at once.
+    requestAnimationFrame(() => setTimeout(() => this.loadWeave(tex), 0));
   }
 
   // ---------- Public API ----------
 
   setWind(w: number) {
     this.wind = clamp(w, 0, 2);
-    for (const f of this.flags()) f.wind = this.wind;
   }
 
-  setLogos(logos: ManifestLogo[], filesBase: string) {
-    this.logos = logos;
-    this.images = logos.map(() => null);
-    this.argentina.invalidate();
-    logos.forEach((logo, i) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => {
-        if (this.logos !== logos) return;
-        this.images[i] = img;
-        this.argentina.invalidate();
-      };
-      img.src = `${filesBase}/${encodeURIComponent(logo.image)}`;
-    });
+  /** Logo and color for the second flag. Repaints at once (live preview). */
+  setStartup(logo: LogoImage | null, bg: string, name?: string) {
+    this.logo = logo;
+    this.bg = bg;
+    this.hasStartup = true;
+    this.paintStartup();
+    if (name) {
+      this.renderer.domElement.setAttribute("aria-label", `Bandera de ${name} junto a la bandera argentina. Arrastrá para girar.`);
+    }
   }
 
-  setSolo(index: number | null) {
-    this.soloIndex = index;
-    this.argentina.invalidate();
+  /** Moves the second flag up (1) or down (0) the pole. `seconds` 0 jumps. Resolves when it arrives. */
+  hoistTo(target: number, seconds = HOIST_SECONDS): Promise<void> {
+    this.hoistDone?.();
+    this.hoistFrom = this.hoist;
+    this.hoistTarget = clamp(target, 0, 1);
+    this.hoistStart = performance.now();
+    const ms = (seconds * 1000) / this.motionScale;
+    if (ms <= 0 || this.hoist === this.hoistTarget) {
+      this.hoist = this.hoistTarget;
+      this.startup.setHoist(this.hoist);
+      return Promise.resolve();
+    }
+    this.hoistDuration = ms;
+    return new Promise((resolve) => (this.hoistDone = resolve));
   }
-
-  /**
-   * Shows a startup's flag beside the Argentine flag, or null to go back to Argentina alone.
-   * A new startup replaces the current one: the old flag comes down, then the new one goes up.
-   */
-  showStartup(startup: Startup | null) {
-    const current = this.currentStartup();
-    if ((current?.id ?? null) === (startup?.id ?? null)) return;
-    if (current) current.up = false;
-    this.renderer.domElement.setAttribute(
-      "aria-label",
-      startup ? `Argentine flag beside the flag of ${startup.name}. Drag or use the arrow keys to rotate.` : MAIN_LABEL,
-    );
-    if (!startup) return;
-
-    const entry: StartupEntry = {
-      id: startup.id, raise: current ? -0.6 : 0, up: true, ready: false, logo: null, accent: null,
-      flag: null as unknown as ClothFlag,
-    };
-    entry.flag = new ClothFlag(
-      (c, weave) => drawStartupFlag(c, { logo: entry.logo, accent: entry.accent, weave }),
-      this.grid, this.renderer.capabilities.getMaxAnisotropy(), this.wind,
-    );
-    if (this.weave) entry.flag.setWeave(this.weave.overlay, this.weave.normal);
-    entry.flag.group.position.set(STARTUP_X, -HOIST_DROP, 0);
-    entry.flag.group.visible = false;
-    this.group.add(entry.flag.group);
-    this.startups.push(entry);
-
-    // Hold the hoist until the logo is in, so the flag never rises blank and then changes color.
-    const timer = setTimeout(() => (entry.ready = true), LOGO_TIMEOUT_MS);
-    const load = (cors: boolean) => {
-      const img = new Image();
-      img.decoding = "async";
-      // CORS lets prepareLogo read the pixels when the files live on another origin.
-      if (cors) img.crossOrigin = "anonymous";
-      img.onload = () => {
-        clearTimeout(timer);
-        // Runs once per startup: background removal reads every pixel, so never per frame.
-        const { logo, accent } = prepareLogo(img);
-        entry.logo = logo;
-        entry.accent = accent;
-        entry.ready = true;
-        entry.flag.invalidate();
-      };
-      img.onerror = () => {
-        // A host without CORS headers fails the CORS request: retry plain, and show the logo uncleaned.
-        if (cors) return load(false);
-        clearTimeout(timer);
-        entry.ready = true;
-      };
-      img.src = startup.logo;
-    };
-    load(true);
-  }
+  private hoistDuration = 1;
 
   resetView() {
-    this.targetYaw = 0;
+    this.targetYaw = DEFAULT_YAW;
     this.targetPitch = DEFAULT_PITCH;
     this.zoom = 1;
   }
@@ -269,66 +241,157 @@ export class FlagScene {
     this.zoom = clamp(this.zoom * factor, ZOOM_MIN, ZOOM_MAX);
   }
 
-  private currentStartup(): StartupEntry | null {
-    const last = this.startups[this.startups.length - 1];
-    return last?.up ? last : null;
-  }
-
-  private flags(): ClothFlag[] {
-    return [this.argentina, ...this.startups.map((s) => s.flag)];
-  }
-
-  // ---------- Pause and frame history ----------
-
   get paused() {
     return this.isPaused;
   }
 
-  /** Number of saved frames of the Argentine flag (the last 6 seconds of motion). */
-  get frameCount() {
-    return this.argentina.frameCount;
-  }
-
-  /** Stops the wind. Every flag freezes on its current frame. Camera controls still work. */
-  pause(): number {
+  pause() {
     this.isPaused = true;
-    for (const f of this.flags()) f.freeze(); // so the newest slider position is exactly the frozen pose
-    return this.argentina.frameCount - 1;
+    this.pausedAt = this.time;
   }
 
-  /** Resumes from the frame shown now. Frames after it are dropped. */
   play() {
-    if (!this.isPaused) return;
-    for (const f of this.flags()) f.resume();
     this.isPaused = false;
     this.lastTime = performance.now();
   }
 
-  /** While paused: shows saved frame `index` (0 = oldest). All flags step back together. */
-  showFrame(index: number) {
+  /** While paused: 0 to 1 moves through one full 4 s cycle of the wind (the motion repeats after it). */
+  scrub(f: number) {
     if (!this.isPaused) return;
-    const fromNewest = this.argentina.frameCount - 1 - index;
-    for (const f of this.flags()) f.showFrame(fromNewest);
+    this.time = this.pausedAt - (1 - clamp(f, 0, 1)) * LOOP_SECONDS;
   }
 
-  // ---------- Capture ----------
+  /**
+   * Screen pixels at the bottom covered by UI. The flags fit and center above them.
+   * The first value applies at once; later changes ease in.
+   */
+  setInsetBottom(px: number) {
+    const v = Math.max(0, px);
+    if (this.insetTarget === null) this.insetBottom = v;
+    this.insetTarget = v;
+  }
+
+  /** Screen pixels at the top covered by UI (corner links). */
+  setInsetTop(px: number) {
+    this.insetTop = Math.max(0, px);
+  }
 
   /**
-   * Captures exactly what the screen shows (same camera, angle, zoom, and framing),
-   * at 2400 px wide, on the page background, with a "flag.ar" watermark at the bottom.
+   * Screen pixels at the right covered by a side panel. The canvas stays full width under it, so the
+   * panel's glass blurs the sky and not the page. Changes ease in.
    */
+  setInsetRight(px: number) {
+    this.insetRightTarget = Math.max(0, px);
+  }
+
+  /**
+   * The part of the screen the flags may use: below the top UI, above the bottom UI, left of a side panel.
+   * At least 40% of the height and 50% of the width. Exports skip the side panel: it is not in the image.
+   */
+  private freeArea(w: number, h: number, withSide = true): Rect {
+    const bottom = Math.min(this.insetBottom, h * 0.6);
+    const top = Math.min(this.insetTop, Math.max(0, h - bottom - h * 0.4));
+    const right = withSide ? Math.min(this.insetRight, w * 0.5) : 0;
+    return { x: 0, y: top, w: w - right, h: h - bottom - top };
+  }
+
+  // ---------- Export ----------
+
+  /** What the screen shows (same angle and zoom), 2400 px wide, with the watermark. */
   async capture(): Promise<Blob> {
-    for (const f of this.flags()) if (f.textureDirty) f.redraw();
     const { w: cw, h: ch } = this.view;
-    const w = EXPORT_WIDTH;
-    const h = Math.round((EXPORT_WIDTH * ch) / Math.max(1, cw));
+    const w = EXPORT_WIDTH, h = Math.round((EXPORT_WIDTH * ch) / Math.max(1, cw));
     const k = w / cw;
+    const f = this.freeArea(cw, ch, false);
+    return this.still(w, h, { x: f.x * k, y: f.y * k, w: f.w * k, h: f.h * k }, true, "image/png");
+  }
+
+  /**
+   * Fixed composition for a download (header, banner, wallpaper). `free` is the area the flags may use:
+   * a LinkedIn banner keeps the profile photo corner clear, a phone wallpaper keeps the clock clear.
+   */
+  poster(w: number, h: number, free: Rect, type: "image/png" | "image/jpeg" = "image/jpeg"): Promise<Blob> {
+    return this.still(w, h, free, false, type);
+  }
+
+  /** Records one 4 s wind cycle: it loops without a seam. MP4 where the browser can, else WebM. */
+  async recordLoop(w = 1280, h = 720): Promise<{ blob: Blob; ext: "mp4" | "webm" }> {
+    const canvas = this.renderer.domElement;
+    const type = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"]
+      .find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t));
+    if (!type || !canvas.captureStream) throw new Error("Este navegador no puede grabar video.");
+    this.recording = true;
     const pr = this.renderer.getPixelRatio();
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(w, h, false);
-    this.updateCamera(w, h, this.insetBottom * k);
-    this.renderFrame();
+    const stream = canvas.captureStream(30);
+    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8_000_000 });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise<void>((r) => (rec.onstop = () => r()));
+    const t0 = this.time;
+    const start = performance.now();
+    const free = { x: w * 0.06, y: h * 0.08, w: w * 0.88, h: h * 0.84 };
+    rec.start();
+    await new Promise<void>((resolve) => {
+      const frame = () => {
+        const s = Math.min((performance.now() - start) / 1000, LOOP_SECONDS);
+        this.time = t0 + s;
+        this.renderFixed(w, h, free);
+        this.watermarkOnCanvas();
+        if (s >= LOOP_SECONDS) return resolve();
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    rec.stop();
+    await done;
+    stream.getTracks().forEach((t) => t.stop());
+    this.renderer.setPixelRatio(pr);
+    this.recording = false;
+    this.resize();
+    return { blob: new Blob(chunks, { type: type.split(";")[0] }), ext: type.startsWith("video/mp4") ? "mp4" : "webm" };
+  }
 
+  dispose() {
+    this.disposed = true;
+    cancelAnimationFrame(this.raf);
+    this.resizeObserver.disconnect();
+    this.argentina.dispose();
+    this.startup.dispose();
+    this.normalMap?.dispose();
+    this.scene.environment?.dispose();
+    disposeSkyDome(this.dome);
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+  }
+
+  // ---------- Internals ----------
+
+  private paintStartup() {
+    const show = this.hasStartup ? this.bg : "#f4f1ec";
+    this.startup.paint((c) => drawStartupFlag(c, { logo: this.logo, bg: show, weave: this.weave }));
+  }
+
+  private loadWeave(tex: [number, number]) {
+    if (this.disposed) return;
+    const { overlay, normal } = buildWeave(tex[0], tex[1]);
+    this.weave = overlay;
+    this.normalMap = new THREE.CanvasTexture(normal);
+    this.normalMap.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.argentina.paint((c) => drawArgentineFlag(c, overlay));
+    this.paintStartup();
+    this.argentina.setNormalMap(this.normalMap);
+    this.startup.setNormalMap(this.normalMap);
+  }
+
+  private async still(w: number, h: number, free: Rect, sameView: boolean, type: string): Promise<Blob> {
+    const pr = this.renderer.getPixelRatio();
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(w, h, false);
+    if (sameView) this.placeCamera(w, h, free, this.yaw, this.pitch, this.zoom);
+    else this.placeCamera(w, h, free, DEFAULT_YAW, DEFAULT_PITCH, 1);
+    this.renderFrame();
     // Copy in the same task: the WebGL buffer is not kept after this frame.
     const out = createCanvas(w, h);
     const ctx = out.getContext("2d")!;
@@ -339,147 +402,104 @@ export class FlagScene {
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(this.renderer.domElement, 0, 0);
     drawWatermark(ctx, w, h);
-
     this.renderer.setPixelRatio(pr);
     this.resize();
     return new Promise((resolve, reject) =>
-      out.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG export failed"))), "image/png"),
+      out.toBlob((b) => (b ? resolve(b) : reject(new Error("export failed"))), type, 0.92),
     );
   }
 
-  dispose() {
-    this.disposed = true;
-    cancelAnimationFrame(this.raf);
-    this.resizeObserver.disconnect();
-    for (const f of this.flags()) f.dispose();
-    this.startups = [];
-    this.weave?.normal.dispose();
-    this.scene.environment?.dispose();
-    disposeSkyDome(this.dome);
-    this.renderer.dispose();
-    this.renderer.domElement.remove();
+  private renderFixed(w: number, h: number, free: Rect) {
+    this.argentina.update(this.time, this.windShown);
+    this.startup.update(this.time, this.windShown);
+    this.placeCamera(w, h, free, DEFAULT_YAW, DEFAULT_PITCH, 1);
+    this.renderFrame();
   }
 
-  // ---------- Build ----------
-
-  private buildEnvironment(): THREE.Texture {
-    // Sunset studio: dusk gradient, a hot sun box low behind the flag, a soft pink fill in front.
-    const env = new THREE.Scene();
-    // Built-in material on purpose: r128 PMREM encodes RGBE, and only built-in materials apply it.
-    const skyGeo = new THREE.SphereGeometry(50, 32, 16);
-    const zenith = new THREE.Color(0x2c2c5c), horizon = new THREE.Color(0xf08a4e), ground = new THREE.Color(0x8a74a8);
-    const pos = skyGeo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / 50; // -1 bottom, 1 top
-      const c = y >= 0
-        ? horizon.clone().lerp(zenith, THREE.MathUtils.smoothstep(y, 0, 0.7))
-        : horizon.clone().lerp(ground, THREE.MathUtils.smoothstep(-y, 0, 0.35));
-      colors.set([c.r, c.g, c.b], i * 3);
-    }
-    skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    env.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
-    const box = (x: number, y: number, z: number, w: number, h: number, power: number, color = 0xffffff) => {
-      const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(w, h),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(power), side: THREE.DoubleSide }),
+  /** The video track has no 2D layer, so the watermark is a tiny overlay scene drawn after the 3D. */
+  private watermarkScene: { scene: THREE.Scene; camera: THREE.OrthographicCamera; tex: THREE.Texture } | null = null;
+  private watermarkOnCanvas() {
+    if (!this.watermarkScene) {
+      const c = createCanvas(256, 64);
+      const ctx = c.getContext("2d")!;
+      ctx.font = "700 34px system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(255, 244, 228, 0.85)";
+      ctx.shadowColor = "rgba(60, 25, 20, 0.45)";
+      ctx.shadowBlur = 8;
+      ctx.fillText("flag.ar", 128, 32);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      const sprite = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.22, 0.055),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }),
       );
-      m.position.set(x, y, z);
-      m.lookAt(0, 0, 0);
-      env.add(m);
-    };
-    const sun = SUN_DIR.clone().multiplyScalar(22);
-    box(sun.x, sun.y + 1, sun.z, 14, 8, 5, 0xffa060);
-    box(12, 4, 16, 16, 10, 1.6, 0xffb48a);
-    box(-14, 12, 14, 14, 10, 0.7, 0xb9a6e0);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    const tex = pmrem.fromScene(env, 0.04).texture;
-    pmrem.dispose();
-    return tex;
+      sprite.position.set(0, -0.92, 0);
+      scene.add(sprite);
+      this.watermarkScene = { scene, camera: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2), tex };
+    }
+    const { scene, camera } = this.watermarkScene;
+    const aspect = this.renderer.domElement.width / this.renderer.domElement.height;
+    camera.left = -aspect; camera.right = aspect; camera.updateProjectionMatrix();
+    this.renderer.autoClear = false;
+    this.renderer.render(scene, camera);
+    this.renderer.autoClear = true;
   }
 
   private renderFrame() {
-    this.dome.position.copy(this.camera.position); // the backdrop is infinitely far: it never gets closer
+    this.dome.position.copy(this.camera.position);
     setAuraFrom(this.dome, this.camera);
     this.renderer.render(this.scene, this.camera);
   }
 
-  private loadWeave() {
-    if (this.disposed) return;
-    const { overlay, normal } = buildWeave();
-    const normalTex = new THREE.CanvasTexture(normal);
-    normalTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    this.weave = { overlay, normal: normalTex };
-    for (const f of this.flags()) f.setWeave(overlay, normalTex);
-  }
-
-  // ---------- Loop ----------
-
   private loop = (now: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min((now - this.lastTime) / 1000, 0.25);
+    if (this.recording) return; // the recorder drives frames itself
+    const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
 
-    if (!this.isPaused) setSkyTime(this.dome, (this.skyTime += dt));
-    this.argentina.update(dt, this.isPaused);
-    this.updateStartups(dt);
+    if (!this.isPaused) {
+      this.time += dt;
+      setSkyTime(this.dome, this.time);
+    }
+    this.windShown += (this.wind - this.windShown) * Math.min(1, dt * 2.5);
+    this.argentina.update(this.time, this.windShown);
+    this.startup.update(this.time, this.windShown);
+
+    if (this.hoist !== this.hoistTarget) {
+      const f = Math.min(1, (now - this.hoistStart) / this.hoistDuration);
+      this.hoist = this.hoistFrom + (this.hoistTarget - this.hoistFrom) * easeInOutCubic(f);
+      if (f >= 1) {
+        this.hoist = this.hoistTarget;
+        this.hoistDone?.();
+        this.hoistDone = null;
+      }
+      this.startup.setHoist(this.hoist);
+    }
 
     this.yaw += (this.targetYaw - this.yaw) * EASE;
     this.pitch += (this.targetPitch - this.pitch) * EASE;
     if (this.insetTarget !== null) this.insetBottom += (this.insetTarget - this.insetBottom) * EASE;
-    this.updateCamera();
+    this.insetRight += (this.insetRightTarget - this.insetRight) * EASE;
+    const { w, h } = this.view;
+    this.placeCamera(w, h, this.freeArea(w, h), this.yaw, this.pitch, this.zoom);
+    this.handheld(now / 1000);
     this.renderFrame();
-    this.tuneQuality(dt);
   };
 
-  /** Hoists and lowers startup flags, and moves the pair view toward its target. */
-  private updateStartups(dt: number) {
-    const move = dt * this.motionScale;
-    const pairTarget = this.currentStartup() ? 1 : 0;
-    this.pair = pairTarget === 1
-      ? Math.min(1, this.pair + move / CAMERA_SECONDS)
-      : Math.max(0, this.pair - move / CAMERA_SECONDS);
-
-    for (const s of [...this.startups]) {
-      if (s.up && s.ready) s.raise = Math.min(1, s.raise + move / HOIST_SECONDS);
-      if (!s.up) s.raise -= move / LOWER_SECONDS;
-      if (!s.up && s.raise <= 0) {
-        s.flag.dispose();
-        this.startups.splice(this.startups.indexOf(s), 1);
-        continue;
-      }
-      const r = smoothstep(clamp(s.raise, 0, 1));
-      s.flag.group.visible = r > 0;
-      s.flag.group.position.y = -HOIST_DROP * (1 - r);
-      if (r > 0) s.flag.update(dt, this.isPaused);
-    }
-  }
-
-  /** On a slow device: lower the cloth grid first, then the pass count, then the shadow size. */
-  private tuneQuality(dt: number) {
-    if (this.isPaused) return; // a rebuild would drop the saved frames
-    this.frames++;
-    if (dt > 1 / 30) this.slowFrames++;
-    if (this.frames < 120) return;
-    const slowSim = this.argentina.cloth.stepMs > 6;
-    const slowFrames = this.slowFrames > 60;
-    this.frames = 0;
-    this.slowFrames = 0;
-    if (!slowSim && !slowFrames) return;
-    if (this.quality === 0) {
-      this.grid = { cols: 48, rows: 32, passes: 10 };
-      for (const f of this.flags()) f.rebuild(this.grid);
-    } else if (this.quality === 1) {
-      this.grid.passes = 6;
-      for (const f of this.flags()) f.cloth.passes = 6;
-    } else if (this.quality === 2) {
-      this.keyLight.shadow.mapSize.set(1024, 1024);
-      // r128 types the map loosely; it is a WebGLRenderTarget. Null makes the renderer rebuild it.
-      (this.keyLight.shadow.map as unknown as THREE.WebGLRenderTarget | null)?.dispose();
-      (this.keyLight.shadow as unknown as { map: null }).map = null;
-    } else return;
-    this.quality++;
+  /**
+   * Live view only: a slow drift of a few pixels, like a camera held by hand. Exports skip it (the
+   * video must loop), and reduced motion turns it off.
+   */
+  private handheld(t: number) {
+    if (this.motionScale !== 1) return;
+    const yaw = Math.sin(t * 0.53) + 0.6 * Math.sin(t * 1.31 + 1.0);
+    const pitch = Math.sin(t * 0.71 + 2.0) + 0.5 * Math.sin(t * 1.77);
+    this.camera.rotateY(yaw * 0.0012);
+    this.camera.rotateX(pitch * 0.0009);
   }
 
   private resize() {
@@ -487,79 +507,64 @@ export class FlagScene {
     if (w === 0 || h === 0) return;
     this.renderer.setSize(w, h, false);
     this.view = { w, h };
-    this.updateCamera();
   }
 
-  /**
-   * Screen pixels at the bottom covered by UI (toolbar, startup details). The flags fit and center above them.
-   * The first value applies at once; later changes ease in, so the camera glides instead of jumping.
-   */
-  setInsetBottom(px: number) {
-    const v = Math.max(0, px);
-    if (this.insetTarget === null) this.insetBottom = v;
-    this.insetTarget = v;
-    this.updateCamera();
+  /** Moves the flags for a layout. Cheap (two group positions), so it can change per export. */
+  private applyLayout(layout: Layout) {
+    if (layout === this.layout) return;
+    this.layout = layout;
+    if (layout === "side") {
+      this.argentina.group.position.set(AR_X, AR_TOP, 0);
+      this.startup.group.position.set(SU_X, SU_TOP, 0);
+    } else {
+      this.argentina.group.position.set(0, AR_TOP, 0);
+      // Same pole: the startup flag rides below Argentina. Its own pole is hidden.
+      this.startup.group.position.set(0, AR_TOP - FLAG_HEIGHT - STACK_GAP, 0);
+    }
+    this.startup.setPoleVisible(layout === "side");
+    const b = BOXES[layout];
+    this.keyLight.target.position.set((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, 0);
+    // From the side, low: the folds catch light on one flank and shade on the other.
+    this.keyLight.position.set(this.keyLight.target.position.x + 16, this.keyLight.target.position.y + 7, 10);
   }
+  private layout: Layout | null = null;
 
-  private updateCamera(w = this.view.w, h = this.view.h, inset = this.insetBottom) {
-    inset = Math.min(inset, h * 0.55);
-    const availH = h - inset;
+  /** Fits the framing box into `free` (pixels of a w × h image), seen from yaw and pitch. */
+  private placeCamera(w: number, h: number, free: Rect, yaw: number, pitch: number, zoom: number) {
+    this.applyLayout(free.w / free.h < STACK_BELOW ? "stacked" : "side");
+    const BOX = BOXES[this.layout!];
     const tanV = Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
     const tanH = tanV * (w / h);
-    // Pair view: the framed width grows to hold both flags, and the view centers between them.
-    const p = smoothstep(this.pair);
-    const width = FLAG_WIDTH + (PAIR_WIDTH - FLAG_WIDTH) * p;
-    const center = new THREE.Vector3((STARTUP_X / 2) * p, 0, 0);
-    const yaw = this.yaw + PAIR_YAW * p;
-    // Fit the flags to any screen: the larger of a width fit and a height fit, inside the free area.
-    // The pair gets a wider margin: the nearer startup flag looks larger in perspective.
-    const fitW = (width * (1.1 + 0.08 * p)) / 2 / tanH;
-    const fitH = (FLAG_HEIGHT * 1.55) / 2 / (tanV * (availH / h));
-    const dist = Math.max(fitW, fitH) * this.zoom;
+    const bw = BOX.x1 - BOX.x0, bh = BOX.y1 - BOX.y0;
+    const fitW = (bw * 1.12) / 2 / (tanH * (free.w / w));
+    const fitH = (bh * 1.1) / 2 / (tanV * (free.h / h));
+    const dist = Math.max(fitW, fitH) * zoom;
+    const center = new THREE.Vector3((BOX.x0 + BOX.x1) / 2, (BOX.y0 + BOX.y1) / 2, 0);
     this.camera.aspect = w / h;
-    // Shift the view so the flags center in the free area above the bottom UI.
-    if (inset > 0) this.camera.setViewOffset(w, h, 0, inset / 2, w, h);
+    const ox = w / 2 - (free.x + free.w / 2), oy = h / 2 - (free.y + free.h / 2);
+    if (ox !== 0 || oy !== 0) this.camera.setViewOffset(w, h, ox, oy, w, h);
     else this.camera.clearViewOffset();
-    // Orbit: yaw around the vertical axis, pitch up and down.
     this.camera.position.set(
-      center.x + dist * Math.sin(yaw) * Math.cos(this.pitch),
-      dist * Math.sin(this.pitch),
-      dist * Math.cos(yaw) * Math.cos(this.pitch),
+      center.x + dist * Math.sin(yaw) * Math.cos(pitch),
+      center.y + dist * Math.sin(pitch),
+      dist * Math.cos(yaw) * Math.cos(pitch),
     );
     this.camera.lookAt(center);
     this.camera.updateProjectionMatrix();
-
-    // The key light and its shadow box follow the view, so both flags cast soft shadows.
-    this.keyLight.position.set(center.x + 10, 3.2, 9);
-    this.keyLight.target.position.copy(center);
-    const sc = this.keyLight.shadow.camera as THREE.OrthographicCamera;
-    const half = 11 + (width - FLAG_WIDTH) / 2;
-    if (sc.right !== half) {
-      sc.left = -half;
-      sc.right = half;
-      sc.updateProjectionMatrix();
-    }
   }
-
-  // ---------- Input ----------
 
   private bindInput(canvas: HTMLCanvasElement) {
     canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY });
-      if (this.pointers.size === 1) this.moved = false;
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pointers.size === 2) {
         this.pinchStart = this.pinchDistance();
         this.zoomAtPinch = this.zoom;
-        this.moved = true;
       }
     });
     canvas.addEventListener("pointermove", (e) => {
       const p = this.pointers.get(e.pointerId);
-      if (!p) {
-        if (e.pointerType === "mouse") canvas.style.cursor = this.pick(e) >= 0 ? "pointer" : "grab";
-        return;
-      }
+      if (!p) return;
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX;
       p.y = e.clientY;
@@ -568,18 +573,11 @@ export class FlagScene {
         if (this.pinchStart > 0) this.zoom = clamp(this.zoomAtPinch * (this.pinchStart / d), ZOOM_MIN, ZOOM_MAX);
         return;
       }
-      if (Math.hypot(e.clientX - p.startX, e.clientY - p.startY) > TAP_SLOP) this.moved = true;
-      if (this.moved) {
-        canvas.style.cursor = "grabbing";
-        this.rotateBy(-dx * 0.005, dy * 0.005);
-      }
+      canvas.style.cursor = "grabbing";
+      this.rotateBy(-dx * 0.005, dy * 0.005);
     });
     const end = (e: PointerEvent) => {
-      const had = this.pointers.delete(e.pointerId);
-      if (had && this.pointers.size === 0 && !this.moved && e.type === "pointerup") {
-        const i = this.pick(e);
-        this.events.onSelect?.(i >= 0 ? i : null);
-      }
+      this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinchStart = 0;
       canvas.style.cursor = "grab";
     };
@@ -611,35 +609,26 @@ export class FlagScene {
     const [a, b] = [...this.pointers.values()];
     return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
   }
-
-  /** Returns the logo index under the pointer, or -1. Only the Argentine flag carries logos. */
-  private pick(e: { clientX: number; clientY: number }): number {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    this.raycaster.setFromCamera(ndc, this.camera);
-    const hit = this.raycaster.intersectObjects([this.argentina.front, this.argentina.back], false)[0];
-    if (!hit?.uv) return -1;
-    return hitLogo(uvToLayout(hit.uv.x, hit.uv.y), this.logos.length, this.soloIndex);
-  }
 }
 
-function smoothstep(t: number) {
-  return t * t * (3 - 2 * t);
+/** Canvas aspect used by the 2D fallback and the OG image. */
+export const TEXTURE_ASPECT = LAYOUT_W / LAYOUT_H;
+
+function easeInOutCubic(t: number) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const size = Math.round(Math.max(18, Math.min(w, h) * 0.032));
+export function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  // Small: 1.6% of the short side, bottom right, out of the way of the flags.
+  const size = Math.round(Math.max(14, Math.min(w, h) * 0.022));
   ctx.save();
   ctx.font = `700 ${size}px system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif`;
-  ctx.textAlign = "center";
+  ctx.textAlign = "right";
   ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "rgba(255, 244, 228, 0.82)"; // warm white, reads on the golden horizon
+  ctx.fillStyle = "rgba(255, 244, 228, 0.78)";
   ctx.shadowColor = "rgba(60, 25, 20, 0.45)";
   ctx.shadowBlur = size * 0.35;
-  ctx.fillText("flag.ar", w / 2, h - size * 1.2);
+  ctx.fillText("flag.ar", w - size * 1.2, h - size * 1.1);
   ctx.restore();
 }
 

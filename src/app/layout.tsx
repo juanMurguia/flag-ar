@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Argentine Startups Flag",
-  description: "A waving Argentine flag made of the logos of Argentine startups. Add yours.",
+  title: "flag.ar · Izá la bandera de tu startup",
+  description: "La bandera argentina flameando al atardecer. Izá la de tu startup al lado y entrá al Salón de la Fama.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar"),
-  openGraph: { title: "Argentine Startups Flag", url: "/", type: "website" },
+  openGraph: { title: "flag.ar · Izá la bandera de tu startup", url: "/", type: "website", locale: "es_AR" },
   twitter: { card: "summary_large_image" },
 };
 
@@ -18,7 +18,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="es-AR">
       <body>{children}</body>
     </html>
   );

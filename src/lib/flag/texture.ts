@@ -1,41 +1,24 @@
-// Canvas drawing for the flag: bands, Sun of May, hem, stitches, logo patches, weave.
-import {
-  COLORS, LAYOUT_H, LAYOUT_W, PATCH_SIZE, SOLO_PATCH, SUN, TEX_SCALE, patchSlots,
-} from "./layout";
-import {
-  accentColor, hexToRgb, isLightLogo, pickBrandColor, recolor, removeSolidBackground, visibleBounds,
-} from "./startup";
+// Canvas drawing for the flags: the Argentine flag (official colors, Sun of May), the startup flag
+// (logo centered on a color), the hem, and the fabric weave.
+import { dominantColor, defaultBackground } from "@/lib/startups/model";
+import { removeSolidBackground, visibleBounds } from "./startup";
 
 export type LogoImage = CanvasImageSource & { width: number; height: number };
 
-const PATCH_LIGHT = "#FBFBF8";
-const PATCH_DARK = "#1F2433";
+/** Flag proportions 14:9 (Argentine law 2.1:1.35 rounded). Layout units; canvases scale them. */
+export const LAYOUT_W = 1400;
+export const LAYOUT_H = 900;
+export const FLAG_ASPECT = LAYOUT_W / LAYOUT_H;
 
-// One pixel read per logo. The texture redraws often, the answer never changes.
-const lightCache = new WeakMap<object, boolean>();
-function needsDarkPatch(img: LogoImage): boolean {
-  let v = lightCache.get(img);
-  if (v === undefined) {
-    try {
-      const size = 48;
-      const c = createCanvas(size, size);
-      const ctx = c.getContext("2d", { willReadFrequently: true })!;
-      // Stretch to fill: only alpha and lightness matter here, not the shape.
-      ctx.drawImage(img, 0, 0, size, size);
-      v = isLightLogo(ctx.getImageData(0, 0, size, size).data);
-    } catch {
-      v = false;
-    }
-    lightCache.set(img, v);
-  }
-  return v;
-}
+export const COLORS = {
+  blue: "#74ACDF", // celeste oficial
+  white: "#FFFFFF",
+  sun: "#F6B40E",
+  sunLine: "#85340A",
+};
 
-export interface DrawOptions {
-  logos: (LogoImage | null)[]; // in slot order; null = still loading
-  soloIndex: number | null;
-  weave?: HTMLCanvasElement | null; // gray overlay, multiplied over the colors
-}
+/** Free border around the logo on the startup flag, per side. */
+export const LOGO_MARGIN = 0.2;
 
 export function createCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
@@ -44,124 +27,91 @@ export function createCanvas(w: number, h: number): HTMLCanvasElement {
   return c;
 }
 
-export function drawFlag(canvas: HTMLCanvasElement, opts: DrawOptions): void {
+function withLayout(canvas: HTMLCanvasElement, draw: (ctx: CanvasRenderingContext2D) => void) {
   const ctx = canvas.getContext("2d")!;
-  const s = canvas.width / LAYOUT_W;
   ctx.save();
-  ctx.setTransform(s, 0, 0, s, 0, 0);
-
-  const band = LAYOUT_H / 3;
-  ctx.fillStyle = COLORS.blue;
-  ctx.fillRect(0, 0, LAYOUT_W, band);
-  ctx.fillStyle = COLORS.white;
-  ctx.fillRect(0, band, LAYOUT_W, band);
-  ctx.fillStyle = COLORS.blue;
-  ctx.fillRect(0, band * 2, LAYOUT_W, LAYOUT_H - band * 2);
-
-  drawSun(ctx, SUN.x, SUN.y, 125);
-  drawHem(ctx);
-
-  if (opts.soloIndex !== null) {
-    const img = opts.logos[opts.soloIndex] ?? null;
-    drawPatch(ctx, SOLO_PATCH.x, SOLO_PATCH.y, SOLO_PATCH.w, SOLO_PATCH.h, img);
-  } else {
-    const slots = patchSlots();
-    opts.logos.slice(0, slots.length).forEach((img, i) => {
-      drawPatch(ctx, slots[i].x, slots[i].y, PATCH_SIZE, PATCH_SIZE, img);
-    });
-  }
+  ctx.setTransform(canvas.width / LAYOUT_W, 0, 0, canvas.height / LAYOUT_H, 0, 0);
+  draw(ctx);
   ctx.restore();
+}
 
-  if (opts.weave) {
-    ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.drawImage(opts.weave, 0, 0, canvas.width, canvas.height);
-    ctx.restore();
-  }
+function applyWeave(canvas: HTMLCanvasElement, weave?: HTMLCanvasElement | null) {
+  if (!weave) return;
+  const ctx = canvas.getContext("2d")!;
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.drawImage(weave, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+/** The Argentine flag, clean: three bands and the Sun of May. Nothing else is ever drawn on it. */
+export function drawArgentineFlag(canvas: HTMLCanvasElement, weave?: HTMLCanvasElement | null): void {
+  withLayout(canvas, (ctx) => {
+    const band = LAYOUT_H / 3;
+    ctx.fillStyle = COLORS.blue;
+    ctx.fillRect(0, 0, LAYOUT_W, band);
+    ctx.fillStyle = COLORS.white;
+    ctx.fillRect(0, band, LAYOUT_W, band);
+    ctx.fillStyle = COLORS.blue;
+    ctx.fillRect(0, band * 2, LAYOUT_W, LAYOUT_H - band * 2);
+    // Sun diameter is 5/6 of the white band.
+    drawSun(ctx, LAYOUT_W / 2, LAYOUT_H / 2, band * 0.42);
+    drawHem(ctx);
+  });
+  applyWeave(canvas, weave);
 }
 
 export interface StartupFlagOptions {
-  logo: LogoImage | null; // null = still loading
-  accent: string | null; // brand color stripe at the hoist; null = plain white flag
+  logo: LogoImage | null; // null = still loading, or no logo yet (preview)
+  bg: string;
   weave?: HTMLCanvasElement | null;
 }
 
-/** Accent stripe width at the hoist, in layout units. */
-export const STARTUP_ACCENT = 72;
-const STARTUP_CLOTH = "#FAFAF7"; // white, a touch warm, so it reads as cloth and not as a blank screen
-const STARTUP_INK = "#1F2433"; // for a light mark that would vanish on white
-
-/**
- * A startup's flag: white cloth, the logo printed in the middle, and a brand color stripe at the hoist.
- * The logo is printed straight on the cloth, with no panel, so it must be a clean mark (see prepareLogo).
- */
+/** A startup's flag: one color, the logo centered with a 20% margin on every side. */
 export function drawStartupFlag(canvas: HTMLCanvasElement, opts: StartupFlagOptions): void {
-  const ctx = canvas.getContext("2d")!;
-  const s = canvas.width / LAYOUT_W;
-  ctx.save();
-  ctx.setTransform(s, 0, 0, s, 0, 0);
-
-  ctx.fillStyle = STARTUP_CLOTH;
-  ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
-  const left = opts.accent ? STARTUP_ACCENT : 0;
-  if (opts.accent) {
-    ctx.fillStyle = opts.accent;
-    ctx.fillRect(0, 0, STARTUP_ACCENT, LAYOUT_H);
-  }
-  drawHem(ctx);
-
+  withLayout(canvas, (ctx) => {
+    ctx.fillStyle = opts.bg;
+    ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
+    drawHem(ctx);
+  });
   const img = opts.logo;
   if (img && img.width > 0 && img.height > 0) {
-    // Fit inside a box that leaves wide margins: the cloth folds most near the edges.
-    const boxW = (LAYOUT_W - left) * 0.52, boxH = LAYOUT_H * 0.42;
+    // In canvas pixels, so the logo keeps its own aspect ratio.
+    const ctx = canvas.getContext("2d")!;
+    const boxW = canvas.width * (1 - 2 * LOGO_MARGIN), boxH = canvas.height * (1 - 2 * LOGO_MARGIN);
     const k = Math.min(boxW / img.width, boxH / img.height);
     const dw = img.width * k, dh = img.height * k;
-    const cx = left + (LAYOUT_W - left) / 2;
-    ctx.drawImage(img, cx - dw / 2, LAYOUT_H / 2 - dh / 2, dw, dh);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
   }
-  ctx.restore();
-
-  if (opts.weave) {
-    ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.drawImage(opts.weave, 0, 0, canvas.width, canvas.height);
-    ctx.restore();
-  }
+  applyWeave(canvas, opts.weave);
 }
 
-/** Longest side of the cleaned logo, in pixels. The flag prints it at about 1600 px at most. */
-const LOGO_MAX = 1024;
+/** Longest side of a prepared logo, in pixels. */
+export const LOGO_MAX = 1024;
 
 /**
- * Cleans an uploaded logo for the white flag and finds its accent color:
- * 1. A solid box behind the mark (JPEG, opaque PNG) becomes transparent.
- * 2. A light mark (a white wordmark) is repainted dark, or it would vanish on white.
- * 3. Empty padding is trimmed, so every logo prints at the same visual size.
- * When the pixels cannot be read (cross-origin image without CORS), returns the image as is.
+ * Cleans a logo that already lost its background: trims the empty border.
+ * Also returns the default flag color (dominant color inverted, or white).
+ * `solidFallback`: when the ML step did not run, removes a flat background box by flood fill.
  */
-export function prepareLogo(img: LogoImage): { logo: LogoImage; accent: string | null } {
-  try {
-    const k = Math.min(1, LOGO_MAX / Math.max(img.width, img.height));
-    const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
-    const c = createCanvas(w, h);
-    const ctx = c.getContext("2d", { willReadFrequently: true })!;
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h);
-    const px = data.data;
-
-    removeSolidBackground(px, w, h);
-    const accent = accentColor(pickBrandColor(px));
-    if (isLightLogo(px)) recolor(px, hexToRgb(accent ?? STARTUP_INK));
+export function prepareLogo(img: LogoImage, solidFallback = false): { logo: HTMLCanvasElement; bg: string } {
+  const k = Math.min(1, LOGO_MAX / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
+  const c = createCanvas(w, h);
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h);
+  if (solidFallback) {
+    removeSolidBackground(data.data, w, h);
     ctx.putImageData(data, 0, 0);
-
-    const b = visibleBounds(px, w, h);
-    if (!b) return { logo: img, accent };
-    const out = createCanvas(b.w, b.h);
-    out.getContext("2d")!.drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
-    return { logo: out, accent };
-  } catch {
-    return { logo: img, accent: null }; // tainted canvas
   }
+  const bg = defaultBackground(dominantColor(data.data));
+  const b = visibleBounds(data.data, w, h);
+  if (!b) return { logo: c, bg };
+  const out = createCanvas(b.w, b.h);
+  out.getContext("2d")!.drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+  return { logo: out, bg };
 }
 
 function drawSun(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: number) {
@@ -252,66 +202,25 @@ function drawSun(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: numbe
 }
 
 function drawHem(ctx: CanvasRenderingContext2D) {
-  // Folded hem: a slightly darker strip along every edge.
-  const hem = 14;
+  // Folded hem: a double layer of cloth along every edge. Darker (denser), with a soft fold line inside.
+  const hem = 16;
   ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.05)";
+  ctx.fillStyle = "rgba(0,0,0,0.07)";
   ctx.fillRect(0, 0, LAYOUT_W, hem);
   ctx.fillRect(0, LAYOUT_H - hem, LAYOUT_W, hem);
   ctx.fillRect(0, hem, hem, LAYOUT_H - hem * 2);
   ctx.fillRect(LAYOUT_W - hem, hem, hem, LAYOUT_H - hem * 2);
-  ctx.strokeStyle = "rgba(0,0,0,0.10)";
-  ctx.lineWidth = 0.8;
-  ctx.strokeRect(hem, hem, LAYOUT_W - hem * 2, LAYOUT_H - hem * 2);
-  // Stitch line inside the hem
+  // The fold of the cloth casts a thin soft line where the hem ends.
+  ctx.strokeStyle = "rgba(0,0,0,0.12)";
+  ctx.lineWidth = 1.6;
+  ctx.strokeRect(hem + 0.8, hem + 0.8, LAYOUT_W - hem * 2 - 1.6, LAYOUT_H - hem * 2 - 1.6);
+  // Two stitch lines, as a sewing machine leaves them.
   ctx.setLineDash([5, 3.5]);
-  ctx.strokeStyle = "rgba(40,40,60,0.28)";
+  ctx.strokeStyle = "rgba(40,40,60,0.22)";
   ctx.lineWidth = 1;
-  ctx.strokeRect(hem / 2, hem / 2, LAYOUT_W - hem, LAYOUT_H - hem);
+  ctx.strokeRect(hem * 0.35, hem * 0.35, LAYOUT_W - hem * 0.7, LAYOUT_H - hem * 0.7);
+  ctx.strokeRect(hem * 0.75, hem * 0.75, LAYOUT_W - hem * 1.5, LAYOUT_H - hem * 1.5);
   ctx.restore();
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function drawPatch(
-  ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, img: LogoImage | null, radius = 9,
-) {
-  const x = cx - w / 2, y = cy - h / 2;
-  const inset = Math.max(6, radius * 0.6);
-  const dark = !!img && img.width > 0 && needsDarkPatch(img);
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.22)";
-  ctx.shadowBlur = 3;
-  ctx.shadowOffsetY = 1;
-  ctx.fillStyle = dark ? PATCH_DARK : PATCH_LIGHT;
-  roundRect(ctx, x, y, w, h, radius);
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  ctx.setLineDash([4, 3]);
-  ctx.strokeStyle = dark ? "rgba(255,255,255,0.3)" : "rgba(60,60,70,0.35)";
-  ctx.lineWidth = 0.9;
-  roundRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2, radius * 0.55);
-  ctx.stroke();
-  ctx.restore();
-
-  if (img && img.width > 0 && img.height > 0) {
-    // Keep the logo's aspect ratio inside the patch.
-    const box = Math.min(w, h) * 0.74;
-    const boxW = w - (Math.min(w, h) - box);
-    const k = Math.min(boxW / img.width, box / img.height);
-    const dw = img.width * k, dh = img.height * k;
-    ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
-  }
 }
 
 // ---------- Weave ----------
@@ -330,12 +239,12 @@ function mulberry32(seed: number) {
  * Plain weave, 4 px thread pitch. Builds a 512 px tile, then fills full-size canvases.
  * Returns a gray overlay (multiply) and a tangent-space normal map.
  */
-export function buildWeave(width = LAYOUT_W * TEX_SCALE, height = LAYOUT_H * TEX_SCALE) {
+export function buildWeave(width: number, height: number) {
   const T = 512;
   const PITCH = 4;
   const rand = mulberry32(1816);
-  const threadW = new Float32Array(T / PITCH).map(() => 0.85 + rand() * 0.3); // warp variation
-  const threadH = new Float32Array(T / PITCH).map(() => 0.85 + rand() * 0.3); // weft variation
+  const threadW = new Float32Array(T / PITCH).map(() => 0.96 + rand() * 0.08); // warp variation: small, or mipmaps turn it into stripes
+  const threadH = new Float32Array(T / PITCH).map(() => 0.96 + rand() * 0.08); // weft variation
   const height2 = new Float32Array(T * T);
   for (let y = 0; y < T; y++) {
     const j = Math.floor(y / PITCH);
@@ -356,12 +265,12 @@ export function buildWeave(width = LAYOUT_W * TEX_SCALE, height = LAYOUT_H * TEX
   const normalTile = createCanvas(T, T);
   const o = overlayTile.getContext("2d")!.createImageData(T, T);
   const nm = normalTile.getContext("2d")!.createImageData(T, T);
-  const strength = 2.2;
+  const strength = 1.6;
   for (let y = 0; y < T; y++) {
     for (let x = 0; x < T; x++) {
       const k = y * T + x;
       const h = height2[k];
-      const g = Math.round(255 * Math.min(1, 0.8 + 0.2 * h));
+      const g = Math.round(255 * Math.min(1, 0.92 + 0.08 * h));
       o.data[k * 4] = g;
       o.data[k * 4 + 1] = g;
       o.data[k * 4 + 2] = g;

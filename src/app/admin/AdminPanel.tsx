@@ -2,25 +2,36 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserClient } from "@/lib/client/supabase";
+import { categoryLabel } from "@/lib/startups/model";
 
-type Status = "pending" | "approved" | "denied" | "removed";
+type Status = "pending" | "approved" | "rejected";
+type Filter = Status | "reported";
 
 interface Row {
   id: string;
-  website_url: string;
+  slug: string;
+  name: string;
+  city: string | null;
+  category: string | null;
+  link: string;
   domain: string;
+  logo_path: string | null;
+  bg_color: string;
+  order_number: number;
   status: Status;
+  featured: boolean;
   created_at: string;
-  reviewed_at: string | null;
-  deny_reason: string | null;
-  file_path: string | null;
+  nsfw_score: number | null;
+  report_count: number;
+  reject_reason: string | null;
 }
 
 const FILES_BASE = process.env.NEXT_PUBLIC_FILES_BASE || "/files";
-const FILTERS: { key: Status; label: string }[] = [
+const FILTERS: { key: Filter; label: string }[] = [
   { key: "pending", label: "Pending" },
+  { key: "reported", label: "Reported" },
   { key: "approved", label: "Approved" },
-  { key: "denied", label: "Denied" },
+  { key: "rejected", label: "Rejected" },
 ];
 
 function age(iso: string): string {
@@ -32,12 +43,11 @@ function age(iso: string): string {
 
 export default function AdminPanel() {
   const sb = useMemo(() => browserClient(), []);
-  const [filter, setFilter] = useState<Status>("pending");
+  const [filter, setFilter] = useState<Filter>("pending");
   const [rows, setRows] = useState<Row[]>([]);
-  const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadsOn, setUploadsOn] = useState<boolean | null>(null);
-  const [denyOpen, setDenyOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [blockDomain, setBlockDomain] = useState(false);
   const [blockHash, setBlockHash] = useState(false);
@@ -47,26 +57,11 @@ export default function AdminPanel() {
 
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
-  // Pending files are private: signed links that expire in 60 seconds.
-  const sign = useCallback(async (list: Row[]) => {
-    const paths = list.filter((r) => r.status === "pending" && r.file_path).map((r) => r.file_path!);
-    const map: Record<string, string> = {};
-    if (paths.length > 0) {
-      const { data } = await sb.storage.from("logos-pending").createSignedUrls(paths, 60);
-      const byPath = new Map((data ?? []).map((d) => [d.path, d.signedUrl]));
-      for (const r of list) if (r.file_path && byPath.get(r.file_path)) map[r.id] = byPath.get(r.file_path)!;
-    }
-    for (const r of list) if (r.status === "approved") map[r.id] = `${FILES_BASE}/${r.id}.png`;
-    setThumbs(map);
-  }, [sb]);
-
   const load = useCallback(async () => {
-    const { data, error } = await sb
-      .from("logo_requests")
-      .select("id, website_url, domain, status, created_at, reviewed_at, deny_reason, file_path")
-      .eq("status", filter)
-      .order("created_at", { ascending: false })
-      .limit(300);
+    let q = sb.from("startups")
+      .select("id, slug, name, city, category, link, domain, logo_path, bg_color, order_number, status, featured, created_at, nsfw_score, report_count, reject_reason");
+    q = filter === "reported" ? q.gt("report_count", 0).neq("status", "rejected") : q.eq("status", filter);
+    const { data, error } = await q.order("created_at", { ascending: filter === "pending" }).limit(300);
     if (error) {
       setNotice(error.message);
       return;
@@ -74,19 +69,11 @@ export default function AdminPanel() {
     const list = (data ?? []) as Row[];
     setRows(list);
     setSelectedId((id) => (id && list.some((r) => r.id === id) ? id : list[0]?.id ?? null));
-    await sign(list);
-  }, [sb, filter, sign]);
+  }, [sb, filter]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  // Re-sign before the 60 s links expire.
-  useEffect(() => {
-    if (filter !== "pending") return;
-    const t = setInterval(() => sign(rows), 50_000);
-    return () => clearInterval(t);
-  }, [filter, rows, sign]);
 
   useEffect(() => {
     sb.from("settings").select("value").eq("key", "uploads_enabled").maybeSingle()
@@ -94,53 +81,24 @@ export default function AdminPanel() {
   }, [sb]);
 
   useEffect(() => {
-    setDenyOpen(false);
+    setRejectOpen(false);
     setReason("");
     setBlockDomain(false);
     setBlockHash(false);
   }, [selectedId]);
 
-  async function post(path: string, id: string) {
-    const res = await fetch(path, {
+  async function act(action: string, extra: Record<string, unknown> = {}) {
+    if (!selected || busy) return;
+    setBusy(true);
+    const res = await fetch("/api/admin/startups", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id: selected.id, action, ...extra }),
     });
     const body = (await res.json().catch(() => ({}))) as { message?: string };
-    return { ok: res.ok, message: body.message || (res.ok ? "Done." : `Error ${res.status}`) };
-  }
-
-  async function approve() {
-    if (!selected || selected.status !== "pending" || busy) return;
-    setBusy(true);
-    const r = await post("/api/admin/approve", selected.id);
-    setNotice(r.message);
+    setNotice(body.message || (res.ok ? "Done." : `Error ${res.status}`));
     setBusy(false);
-    if (r.ok) await load();
-  }
-
-  async function remove() {
-    if (!selected || selected.status !== "approved" || busy) return;
-    if (!window.confirm(`Remove ${selected.domain} from the flag?`)) return;
-    setBusy(true);
-    const r = await post("/api/admin/remove", selected.id);
-    setNotice(r.message);
-    setBusy(false);
-    if (r.ok) await load();
-  }
-
-  async function deny() {
-    if (!selected || selected.status !== "pending" || busy) return;
-    setBusy(true);
-    const { error } = await sb.rpc("deny_request", {
-      p_id: selected.id,
-      p_reason: reason.trim() || null,
-      p_block_domain: blockDomain,
-      p_block_hash: blockHash,
-    });
-    setBusy(false);
-    setNotice(error ? error.message : "Denied.");
-    if (!error) await load();
+    if (res.ok) await load();
   }
 
   async function toggleUploads() {
@@ -156,7 +114,7 @@ export default function AdminPanel() {
     window.location.assign("/admin/login");
   }
 
-  // Keyboard: A approves, D denies, arrows move.
+  // Keyboard: A approves, R rejects, arrows move.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -167,18 +125,20 @@ export default function AdminPanel() {
         e.preventDefault();
         const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
         if (rows[j]) setSelectedId(rows[j].id);
-      } else if (e.key === "a" || e.key === "A") {
+      } else if ((e.key === "a" || e.key === "A") && selected?.status === "pending") {
         e.preventDefault();
-        approve();
-      } else if ((e.key === "d" || e.key === "D") && selected?.status === "pending") {
+        act("approve");
+      } else if ((e.key === "r" || e.key === "R") && selected && selected.status !== "rejected") {
         e.preventDefault();
-        setDenyOpen(true);
+        setRejectOpen(true);
         setTimeout(() => reasonRef.current?.focus(), 0);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  const logo = (r: Row) => (r.logo_path ? `${FILES_BASE}/${r.logo_path}` : null);
 
   return (
     <div className="admin">
@@ -196,17 +156,15 @@ export default function AdminPanel() {
         </nav>
         <label className="switch">
           <input type="checkbox" checked={uploadsOn === true} disabled={uploadsOn === null} onChange={toggleUploads} />
-          <span>Uploads {uploadsOn ? "on" : "off"}</span>
+          <span>New flags {uploadsOn ? "on" : "off"}</span>
         </label>
         <button className="btn ghost" onClick={signOut}>Sign out</button>
       </header>
 
-      {notice && (
-        <p className="notice" role="status" onClick={() => setNotice(null)}>{notice}</p>
-      )}
+      {notice && <p className="notice" role="status" onClick={() => setNotice(null)}>{notice}</p>}
 
       <div className="admin-body">
-        <ul className="queue" aria-label="Requests">
+        <ul className="queue" aria-label="Flags">
           {rows.length === 0 && <li className="empty">Nothing here.</li>}
           {rows.map((r) => (
             <li key={r.id}>
@@ -214,53 +172,68 @@ export default function AdminPanel() {
                 className={`queue-row${r.id === selectedId ? " on" : ""}`} onClick={() => setSelectedId(r.id)}
                 aria-current={r.id === selectedId}
               >
-                {thumbs[r.id]
+                {logo(r)
                   // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={thumbs[r.id]} alt="" width={40} height={40} />
+                  ? <img src={logo(r)!} alt="" width={40} height={40} style={{ background: r.bg_color }} />
                   : <span className="thumb-empty" />}
-                <span className="queue-domain">{r.domain}</span>
-                <span className="queue-age">{age(r.created_at)}</span>
+                <span className="queue-domain">#{r.order_number} {r.name}</span>
+                <span className="queue-age">
+                  {r.report_count > 0 && `⚑${r.report_count} `}
+                  {r.nsfw_score !== null && r.nsfw_score > 0.3 && `NSFW ${r.nsfw_score.toFixed(2)} `}
+                  {age(r.created_at)}
+                </span>
               </button>
             </li>
           ))}
         </ul>
 
         {selected && (
-          <aside className="side" aria-label={`Request ${selected.domain}`}>
+          <aside className="side" aria-label={`Flag ${selected.name}`}>
             <div className="previews">
-              {thumbs[selected.id] ? (
+              {logo(selected) ? (
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <div className="preview light"><img src={thumbs[selected.id]} alt="Logo on white" /></div>
+                  <div className="preview" style={{ background: selected.bg_color }}><img src={logo(selected)!} alt="Logo on its flag color" /></div>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <div className="preview dark"><img src={thumbs[selected.id]} alt="Logo on dark" /></div>
+                  <div className="preview dark"><img src={logo(selected)!} alt="Logo on dark" /></div>
                 </>
               ) : (
-                <p className="muted">No file. Denied files are deleted by the hourly job.</p>
+                <p className="muted">No logo (rejected logos are deleted).</p>
               )}
             </div>
             <dl className="facts">
+              <dt>Name</dt><dd>{selected.name}</dd>
+              <dt>Page</dt><dd><a href={`/${selected.slug}`} target="_blank" rel="noreferrer">/{selected.slug}</a></dd>
+              <dt>Category</dt><dd>{categoryLabel(selected.category) ?? "—"}</dd>
               <dt>Domain</dt><dd>{selected.domain}</dd>
-              <dt>Link</dt><dd className="mono">{selected.website_url}</dd>
+              <dt>Link</dt><dd className="mono">{selected.link}</dd>
               <dt>Sent</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd>
-              {selected.reviewed_at && (<><dt>Reviewed</dt><dd>{new Date(selected.reviewed_at).toLocaleString()}</dd></>)}
-              {selected.deny_reason && (<><dt>Reason</dt><dd>{selected.deny_reason}</dd></>)}
+              <dt>NSFW</dt><dd>{selected.nsfw_score === null ? "not checked yet" : selected.nsfw_score.toFixed(3)}</dd>
+              <dt>Reports</dt><dd>{selected.report_count}</dd>
+              {selected.reject_reason && (<><dt>Reason</dt><dd>{selected.reject_reason}</dd></>)}
             </dl>
-            <button
-              className="btn ghost"
-              onClick={() => window.open(selected.website_url, "_blank", "noopener,noreferrer")}
-            >
+            <button className="btn ghost" onClick={() => window.open(selected.link, "_blank", "noopener,noreferrer")}>
               Open link in new tab
             </button>
 
-            {selected.status === "pending" && (
-              <div className="actions">
-                <button className="btn primary" onClick={approve} disabled={busy}>Approve (A)</button>
-                <button className="btn danger" onClick={() => setDenyOpen(true)} disabled={busy}>Deny (D)</button>
-              </div>
-            )}
-            {selected.status === "pending" && denyOpen && (
-              <form className="deny" onSubmit={(e) => { e.preventDefault(); deny(); }}>
+            <div className="actions">
+              {selected.status === "pending" && (
+                <button className="btn primary" onClick={() => act("approve")} disabled={busy}>Approve (A)</button>
+              )}
+              {selected.status !== "rejected" && (
+                <button className="btn danger" onClick={() => setRejectOpen(true)} disabled={busy}>Reject (R)</button>
+              )}
+              {selected.status === "approved" && (
+                <button className="btn ghost" onClick={() => act(selected.featured ? "unfeature" : "feature")} disabled={busy}>
+                  {selected.featured ? "Unfeature" : "Feature"}
+                </button>
+              )}
+              {selected.report_count > 0 && (
+                <button className="btn ghost" onClick={() => act("clear-reports")} disabled={busy}>Clear reports</button>
+              )}
+            </div>
+            {rejectOpen && selected.status !== "rejected" && (
+              <form className="deny" onSubmit={(e) => { e.preventDefault(); act("reject", { reason, blockDomain, blockHash }); }}>
                 <label className="field">
                   <span>Reason (optional)</span>
                   <textarea ref={reasonRef} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
@@ -273,13 +246,8 @@ export default function AdminPanel() {
                   <input type="checkbox" checked={blockHash} onChange={(e) => setBlockHash(e.target.checked)} />
                   Block this image
                 </label>
-                <button className="btn danger" disabled={busy}>Confirm deny</button>
+                <button className="btn danger" disabled={busy}>Confirm reject</button>
               </form>
-            )}
-            {selected.status === "approved" && (
-              <div className="actions">
-                <button className="btn danger" onClick={remove} disabled={busy}>Remove from flag</button>
-              </div>
             )}
           </aside>
         )}
