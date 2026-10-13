@@ -13,39 +13,51 @@
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
 import { CLOUD_BOTTOM, CLOUD_TOP, CloudSea } from "./cloudSea";
-import { applyBacklight, weaveNormalMap, type BacklightUniforms } from "./fabric";
+import { applyBacklight, applyRim, weaveNormalMap, type BacklightUniforms } from "./fabric";
+import { Motes } from "./motes";
 import { poleMaterials } from "./pole";
 import { Post, type PostFx } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
 import { createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
-import { applyWave, flagGeometry, waveUniforms, type WaveUniforms } from "./wave";
+import { applyWave, flagGeometry, foldUniforms, waveUniforms, type FoldUniforms, type WaveUniforms } from "./wave";
 
 // ---------- Layout (meters) ----------
 const FLAG_W = 3.1, FLAG_H = 2.0;
 const POLE_H = 4; // above y = 0: the flag rides just over the cloud tops; the flags matter, not the poles
 const POLE_DEPTH = CLOUD_TOP - CLOUD_BOTTOM + 3; // below them, out of sight
-const ARG_POLE_H = POLE_H * 1.25;
-const ARG_W = FLAG_W * 1.5, ARG_H = FLAG_H * 1.5;
+// The hero: about twice the height and size of the others, so it towers over the low camera.
+const ARG_POLE_H = POLE_H * 1.9;
+const ARG_W = FLAG_W * 2.2, ARG_H = FLAG_H * 2.2;
 const CORRIDOR = 6; // half-width of the empty corridor down the middle
 const DX = 5, DZ = 5.5;
 const FIRST_Z = -2;
 const ARG_ROWS_IN = 3.5; // the Argentine flag stands this many rows down the corridor
 const ARG_Z = FIRST_Z - ARG_ROWS_IN * DZ;
 const ARG_X = -ARG_W * 0.45; // pole left of center, so the cloth sits near the middle of the corridor
+const ARG_CENTER = new THREE.Vector3(ARG_X + ARG_W / 2, ARG_POLE_H - 0.25 - ARG_H / 2, ARG_Z);
 
 // ---------- Look ----------
 const SUN_ELEVATION = 12;
 const SUN_AZIMUTH = 250; // behind the camera and to the right: lights the flag faces, rakes the cloud tops
-const HORIZON = new THREE.Color(0xf2b49c);
-const FOG_DENSITY = 0.0042;
+const HORIZON = new THREE.Color(0xf6c07a); // golden hour: amber haze, not the rose of late dusk
+// The focal light: a warm spot on the Argentine flag and a pool of light on the clouds at its foot.
+const SPOT_GAIN = 5;
+const POOL = new THREE.Vector4(ARG_CENTER.x, ARG_Z, 18, 0.55); // lit clouds at the hero's foot: x, z, radius, strength
+const ARG_WIND = 1.35; // over 1: the hero flies in a stronger wind than the field
+const ARG_RIM = 0.35;
+const MOTE_GAIN = 1.8; // HDR, added per speck. Deep amber: AgX whitens bright points, and white specks read as snow
+const FOG_DENSITY = 0.0065; // aerial perspective: the far rows fade into the haze, so the hall reads as huge
 
 // ---------- Camera ----------
-const START = new THREE.Vector3(0, 4.3, 12);
-const START_PITCH = -0.03;
-const FOV = 40;
-const IDLE_AFTER = 6; // seconds without input before the drift resumes
-const DRIFT_SPEED = 0.35; // m/s
-const DRIFT_STOP_Z = ARG_Z + 14;
+// Low and a little back, on a long lens, looking up: the eye sits just over the cloud tops, the horizon
+// falls in the lower third, the Argentine flag towers, and the telephoto packs the rows behind it.
+const START = new THREE.Vector3(0, 2.9, 20);
+const START_PITCH = 0.07;
+const FOV = 32;
+// Opening shot: the camera cranes down from high and far back to the start view.
+const INTRO_FROM = new THREE.Vector3(0, 11, 54);
+const INTRO_PITCH = -0.05;
+const INTRO_DUR = 8; // s
 const YAW_LIMIT = 1.15; // rad either side of the corridor axis: you can look at the flags, never back
 const PITCH_MIN = -0.3, PITCH_MAX = 0.35;
 const EASE_MOVE = 4; // 1/s: how fast position catches its goal
@@ -57,15 +69,15 @@ const TILE_BLANK = 0, TILE_PLACEHOLDER = 1;
 // Empty slots: plain undyed cloth, a few warm whites so the field does not look printed. The color
 // belongs to the startups and the Argentine flag.
 const PLACEHOLDER_COLORS = ["#fbfaf8", "#f6f5f3", "#fdfcfb", "#f3f2f1"]; // near white: the warm sunset tints them cream on its own
-const PLACEHOLDER_LIFT = 1.7; // over 1 on purpose: Lambert under the low sun reads white cloth as cardboard
+const PLACEHOLDER_LIFT = 1.4; // over 1 on purpose: Lambert under the low sun reads white cloth as cardboard; higher turns it orange in the amber light
 const FRONT_MARKS = 8; // the first empty slots (the best seats) show the "tu startup acá" mark; the rest only on hover
 const HOVER_GLOW = 0.1;
 const EASE_HOVER = 7; // 1/s
 
 type Tier = "high" | "low";
 const TIERS = {
-  high: { steps: 72, cloth: [32, 20] as const, near: 24, lodRange: 300 },
-  low: { steps: 28, cloth: [16, 10] as const, near: 10, lodRange: 150 },
+  high: { steps: 72, cloth: [32, 20] as const, near: 24, lodRange: 300, motes: 450 },
+  low: { steps: 28, cloth: [16, 10] as const, near: 10, lodRange: 150, motes: 180 },
 };
 
 /** Visitor-facing effects. `hd` renders at up to 2x device pixels; off renders at 1x. */
@@ -159,11 +171,12 @@ export class SalonScene {
   camera: THREE.PerspectiveCamera;
   sky: SunsetSky;
   clouds: CloudSea;
+  private motes: Motes;
   post: Post;
   private tier: Tier;
   private fx: SalonFx;
   private sunDir: THREE.Vector3;
-  private sunColor = new THREE.Color(1.0, 0.8, 0.64);
+  private sunColor = new THREE.Color(1.0, 0.7, 0.42);
   private list: PublicStartup[] = [];
   private slots: Slot[] = [];
   private cols = 10;
@@ -213,9 +226,10 @@ export class SalonScene {
   private goalPos = START.clone();
   private goalYaw = 0;
   private goalPitch = START_PITCH;
-  private floatPhase = 0;
-  private idle = 0;
-  private flight: { from: THREE.Vector3; to: THREE.Vector3; yaw0: number; yaw1: number; p0: number; p1: number; t: number; dur: number; select: number | null } | null = null;
+  private flight: {
+    from: THREE.Vector3; to: THREE.Vector3; yaw0: number; yaw1: number; p0: number; p1: number; t: number; dur: number;
+    select: number | null; intro?: boolean;
+  } | null = null;
   private pointers = new Map<number, { x: number; y: number; sx: number; sy: number }>();
   private pinch = 0;
   private moved = false;
@@ -252,18 +266,22 @@ export class SalonScene {
 
     this.scene.fog = new THREE.FogExp2(HORIZON.clone(), FOG_DENSITY);
     this.scene.background = HORIZON.clone();
-    this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON }, 1);
+    this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, }, 1);
     this.scene.add(this.sky.group);
     this.scene.environment = this.sky.environment(renderer);
     // Bright sky fill: the glowing horizon faces the flags, so their shaded flanks stay light, not near black.
     this.scene.environmentIntensity = 1.1;
-    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY }, t.steps);
+    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY, pool: POOL }, t.steps);
     this.scene.add(this.clouds.group);
+    // Golden dust in the air, lit by the low sun. Count by device tier, fixed for the session.
+    this.motes = new Motes(t.motes, new THREE.Color(1, 0.55, 0.2).multiplyScalar(MOTE_GAIN));
+    this.scene.add(this.motes.points);
 
-    const sun = new THREE.DirectionalLight(0xffdcc4, 1.7);
+    const sun = new THREE.DirectionalLight(0xffc27a, 2.1);
     sun.position.copy(this.sunDir).multiplyScalar(100);
     this.scene.add(sun);
-    this.scene.add(new THREE.HemisphereLight(0xdcd6ea, 0xf0cdb8, 0.75));
+    // A cool sky fill over a warm cloud bounce: the cool keeps the shadows from going muddy orange.
+    this.scene.add(new THREE.HemisphereLight(0xc4cbe0, 0xf2b070, 0.8));
 
     const bl = (): BacklightUniforms => ({
       uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: 1.6 }, uGlow: { value: 0 },
@@ -281,6 +299,7 @@ export class SalonScene {
     this.farMaterial = this.atlasMaterial();
 
     this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx);
+    this.intro();
 
     this.resize();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -413,7 +432,6 @@ export class SalonScene {
     this.beforeClaim = null;
     this.inset.goalRight = 0;
     this.inset.goalBottom = 0;
-    this.idle = 0;
   }
 
   /** Logo and color for the claimed flag. Repaints at once (live preview). */
@@ -556,6 +574,21 @@ export class SalonScene {
     this.setHighlight([]);
   }
 
+  /**
+   * Opening shot: cranes down from high and far back to the start view.
+   * Any input takes over at once. Skipped for visitors who ask for reduced motion.
+   */
+  private intro() {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    this.pos.copy(INTRO_FROM);
+    this.goalPos.copy(INTRO_FROM);
+    this.pitch = this.goalPitch = INTRO_PITCH;
+    this.flight = {
+      from: INTRO_FROM.clone(), to: START.clone(), yaw0: 0, yaw1: 0, p0: INTRO_PITCH, p1: START_PITCH, t: 0, dur: INTRO_DUR,
+      select: null, intro: true,
+    };
+  }
+
   /** Along the corridor axis only, whatever the yaw: at either end the camera stops, it never slides sideways. */
   walk(meters: number) {
     this.flight = null;
@@ -598,6 +631,7 @@ export class SalonScene {
     this.resizeObserver.disconnect();
     this.post.dispose();
     this.clouds.dispose();
+    this.motes.dispose();
     this.sky.dispose();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -618,10 +652,10 @@ export class SalonScene {
 
   private buildArgentina() {
     const { metal, gold } = poleMaterials();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.1, ARG_POLE_H + POLE_DEPTH, 12, 1, true), metal);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, ARG_POLE_H + POLE_DEPTH, 16, 1, true), metal);
     shaft.position.set(ARG_X, (ARG_POLE_H - POLE_DEPTH) / 2, ARG_Z);
-    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 10), gold);
-    finial.position.set(ARG_X, ARG_POLE_H + 0.17, ARG_Z);
+    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10), gold);
+    finial.position.set(ARG_X, ARG_POLE_H + 0.24, ARG_Z);
     this.scene.add(shaft, finial);
 
     const canvas = createCanvas(1400, 900);
@@ -629,14 +663,25 @@ export class SalonScene {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const mat = this.fabricMaterial(tex, this.argUniforms);
-    const flag = new THREE.Mesh(flagGeometry(ARG_W, ARG_H, 48, 30), mat);
+    // The hero gets the heavy-cloth wave of the pair page (diagonal folds, a bellying hoist, a snapping
+    // fly end) in stronger wind, with fold shading and a gold rim. The field keeps the cheaper gust wave.
+    this.argUniforms.uWind.value = ARG_WIND;
+    const mat = this.fabricMaterial(tex, this.argUniforms, foldUniforms(this.sunDir, this.sunColor, 0.35));
+    applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
+    const flag = new THREE.Mesh(flagGeometry(ARG_W, ARG_H, 72, 44), mat);
     flag.frustumCulled = false;
-    flag.position.set(ARG_X + 0.08, ARG_POLE_H - 0.25, ARG_Z);
+    flag.position.set(ARG_X + 0.12, ARG_POLE_H - 0.25, ARG_Z);
     this.scene.add(flag);
+
+    // A warm spot on its face from above and in front: the brightest thing in the view.
+    const spot = new THREE.SpotLight(0xffd08a, SPOT_GAIN, 0, 0.16, 0.85, 0);
+    spot.position.copy(ARG_CENTER).add(new THREE.Vector3(0, 30, 18));
+    spot.target.position.copy(ARG_CENTER);
+    this.scene.add(spot, spot.target);
   }
 
-  private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms) {
+  /** `fold`: fold shading and sun through the cloth (the hero only). Without it, the field's gust wave. */
+  private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms, fold: FoldUniforms | null = null) {
     const normal = weaveNormalMap();
     const mat = new THREE.MeshPhysicalMaterial({
       map, side: THREE.DoubleSide, roughness: 0.94, metalness: 0, specularIntensity: 0.12,
@@ -644,7 +689,7 @@ export class SalonScene {
       normalMap: normal, normalScale: new THREE.Vector2(0.12, 0.12),
     });
     mat.normalMap!.repeat.set(36, 24);
-    applyWave(mat, uniforms, false, true);
+    applyWave(mat, uniforms, false, !fold, fold);
     return applyBacklight(mat, uniforms);
   }
 
@@ -966,7 +1011,6 @@ export class SalonScene {
       from: this.pos.clone(), to, yaw0: this.yaw, yaw1, p0: this.pitch, p1, t: 0,
       dur: THREE.MathUtils.clamp(1.2 + dist / 40, 1.4, 4.5), select,
     };
-    this.idle = 0;
   }
 
   private loop = (now: number) => {
@@ -985,13 +1029,14 @@ export class SalonScene {
     if (this.keys.has("ArrowLeft") || this.keys.has("a")) this.turn(1.2 * dt, 0);
     if (this.keys.has("ArrowRight") || this.keys.has("d")) this.turn(-1.2 * dt, 0);
 
-    this.idle += dt;
     if (this.flight) {
       const f = this.flight;
-      f.t = Math.min(1, f.t + dt / f.dur);
-      const k = f.t < 0.5 ? 4 * f.t ** 3 : 1 - Math.pow(-2 * f.t + 2, 3) / 2;
+      // The intro waits for the canvas to fade in, so its first meters are on screen.
+      if (!f.intro || this.frames >= 3) f.t = Math.min(1, f.t + dt / f.dur);
+      // Intro: moves at once and settles slowly, like a crane. Other flights: ease in and out, on a gentle arc.
+      const k = f.intro ? 1 - Math.pow(1 - f.t, 3) : f.t < 0.5 ? 4 * f.t ** 3 : 1 - Math.pow(-2 * f.t + 2, 3) / 2;
       this.pos.lerpVectors(f.from, f.to, k);
-      this.pos.y += Math.sin(Math.PI * k) * Math.min(6, f.from.distanceTo(f.to) * 0.08); // a gentle arc
+      if (!f.intro) this.pos.y += Math.sin(Math.PI * k) * Math.min(6, f.from.distanceTo(f.to) * 0.08);
       this.yaw = f.yaw0 + (f.yaw1 - f.yaw0) * k;
       this.pitch = f.p0 + (f.p1 - f.p0) * k;
       this.goalPos.copy(this.pos);
@@ -999,14 +1044,8 @@ export class SalonScene {
       this.goalPitch = this.pitch;
       if (f.t >= 1) {
         this.flight = null;
-        this.idle = -30; // stay put a while after arriving
         if (f.select !== null) this.events.onSelect?.(f.select);
       }
-    } else if (this.idle > IDLE_AFTER && this.pointers.size === 0 && !this.claiming) {
-      // Idle: drift slowly down the corridor and float.
-      const ramp = Math.min(1, (this.idle - IDLE_AFTER) / 3);
-      if (this.goalPos.z > DRIFT_STOP_Z) this.goalPos.z -= DRIFT_SPEED * dt * ramp;
-      this.floatPhase += dt * ramp;
     }
     if (!this.flight) {
       // Frame-rate independent ease toward the goals.
@@ -1015,15 +1054,15 @@ export class SalonScene {
       this.yaw += (this.goalYaw - this.yaw) * look;
       this.pitch += (this.goalPitch - this.pitch) * look;
     }
-    const float = this.flight ? 0 : Math.sin((this.floatPhase / 30) * Math.PI * 2) * 0.3;
 
     this.updateInset(dt);
     this.updateClaim();
-    this.camera.position.set(this.pos.x, this.pos.y + float, this.pos.z);
+    this.camera.position.copy(this.pos); // the camera moves only with input, flights, and the intro
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
     this.camera.updateMatrixWorld();
     this.sky.update(this.time, this.camera);
     this.clouds.update(this.time, this.camera);
+    this.motes.update(this.time);
 
     // Rising flags and highlight pulse.
     if (this.rising.size && this.far) {
@@ -1069,6 +1108,7 @@ export class SalonScene {
     this.size = { w, h };
     this.renderer.setSize(w, h, false);
     this.post.setSize(w, h);
+    this.motes.setPixelRatio(this.renderer.getPixelRatio());
     this.camera.aspect = w / h;
     // Narrow screens: widen the view so the corridor and the Argentine flag still fit.
     this.camera.fov = w / h < 1 ? Math.min(70, FOV * (1 / (w / h)) * 0.75) : FOV;
@@ -1089,17 +1129,12 @@ export class SalonScene {
     return { kind: index < this.list.length ? "startup" : "placeholder", index };
   }
 
-  private interact() {
-    this.idle = 0;
-  }
-
   private bindInput(canvas: HTMLCanvasElement) {
     canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
       this.moved = false;
       this.pinch = 0;
-      this.interact();
     });
     canvas.addEventListener("pointermove", (e) => {
       if (e.pointerType === "mouse") this.hoverAt = { clientX: e.clientX, clientY: e.clientY }; // picked in the loop, once per frame
@@ -1110,7 +1145,6 @@ export class SalonScene {
       p.y = e.clientY;
       if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 6) this.moved = true;
       if (!this.moved) return;
-      this.interact();
       this.flight = null;
       if (this.pointers.size >= 2) {
         // Two fingers: pinch to fly along the view.
@@ -1148,7 +1182,6 @@ export class SalonScene {
     });
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
-      this.interact();
       // Cap each event: trackpad flings send huge deltas. The ease turns the step into a glide.
       this.walk(-THREE.MathUtils.clamp(e.deltaY, -120, 120) * 0.025);
     }, { passive: false });
@@ -1156,7 +1189,6 @@ export class SalonScene {
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"].includes(e.key)) {
         this.keys.add(e.key);
         this.flight = null;
-        this.interact();
         e.preventDefault();
       }
     });

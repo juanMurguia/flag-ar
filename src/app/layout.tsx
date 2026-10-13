@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { Schibsted_Grotesk } from "next/font/google";
 import { ViewTransition } from "react";
 import "./globals.css";
+
+// Variable font: one self-hosted file covers every weight globals.css uses (400-700).
+const sans = Schibsted_Grotesk({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: "flag.ar · Izá la bandera de tu startup",
@@ -19,7 +23,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-AR">
+    <html lang="es-AR" className={sans.variable}>
       <body>
         {/* Page changes cross-fade through the dusk backdrop (see globals.css, "Page changes"). */}
         <ViewTransition default="page">{children}</ViewTransition>

@@ -7,6 +7,7 @@ import HoistPanel from "./HoistPanel";
 import type { SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, categoryLabel, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
+import { Ambience } from "@/lib/flag/ambience";
 import { xIntent } from "./Share";
 import Icon from "./Icon";
 
@@ -17,6 +18,8 @@ const FX_KEY = "flagar-hq";
 // God rays stay off in both: they wash the sunset out.
 const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: false, hd: true };
 const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
+const SOUND_KEY = "flagar-sound";
+const UI_IDLE_MS = 4000;
 
 function savedHigh(): boolean | null {
   try {
@@ -24,6 +27,15 @@ function savedHigh(): boolean | null {
     return v === null ? null : v === "1";
   } catch {
     return null;
+  }
+}
+
+/** Sound is on unless the visitor muted it before. */
+function savedSound(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 
@@ -42,6 +54,40 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   const [high, setHigh] = useState<boolean | null>(null);
   const highRef = useRef(high); // latest value, so fast repeated clicks never toggle from a stale state
   highRef.current = high;
+  // Sound: wind and a low drone. Browsers allow audio only after a gesture, so it starts on the first
+  // click, tap or key press anywhere (except the sound button itself, which decides on its own).
+  const [sound, setSound] = useState(true);
+  const soundRef = useRef(sound);
+  const ambience = useRef<Ambience | null>(null);
+  useEffect(() => {
+    if (view !== "3d") return;
+    const a = new Ambience();
+    ambience.current = a;
+    soundRef.current = savedSound();
+    setSound(soundRef.current);
+    const first = (e: Event) => {
+      if ((e.target as Element | null)?.closest?.("[data-sound]")) return;
+      window.removeEventListener("pointerdown", first);
+      window.removeEventListener("keydown", first);
+      if (soundRef.current) a.start();
+    };
+    // A hidden tab goes quiet, and comes back when the visitor returns.
+    const vis = () => {
+      if (!soundRef.current) return;
+      if (document.hidden) a.stop();
+      else if (navigator.userActivation?.hasBeenActive) a.start();
+    };
+    window.addEventListener("pointerdown", first);
+    window.addEventListener("keydown", first);
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      window.removeEventListener("pointerdown", first);
+      window.removeEventListener("keydown", first);
+      document.removeEventListener("visibilitychange", vis);
+      a.dispose();
+      ambience.current = null;
+    };
+  }, [view]);
   const [picked, setPicked] = useState<PublicStartup | null>(null);
   // The card keeps showing the last flag while it animates out after `picked` clears.
   const [shown, setShown] = useState<PublicStartup | null>(null);
@@ -227,6 +273,17 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     } catch {}
   }
 
+  function toggleSound() {
+    const next = !soundRef.current;
+    soundRef.current = next;
+    setSound(next);
+    if (next) ambience.current?.start();
+    else ambience.current?.stop();
+    try {
+      localStorage.setItem(SOUND_KEY, next ? "1" : "0");
+    } catch {}
+  }
+
   async function wallpaper() {
     const s = scene.current;
     if (!s) return;
@@ -238,8 +295,35 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     "https://flag.ar",
   );
 
+  // Calm UI: in the 3D walk, the bar and the corner fade out after a few seconds without input, so the
+  // view reads as a film still. Any pointer move, touch, wheel, or key brings them back. They stay while
+  // the visitor is busy with them: a query typed, a card or the hoist sheet open, or focus inside.
+  const [uiIdle, setUiIdle] = useState(false);
+  const busy = view !== "3d" || !!query || !!picked || hoist !== "closed";
+  useEffect(() => {
+    if (busy) {
+      setUiIdle(false);
+      return;
+    }
+    let t = 0;
+    const wake = () => {
+      setUiIdle(false);
+      clearTimeout(t);
+      t = window.setTimeout(() => {
+        if (!document.activeElement?.closest(".salon-bar, .salon-corner")) setUiIdle(true);
+      }, UI_IDLE_MS);
+    };
+    const events = ["pointermove", "pointerdown", "wheel", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    wake();
+    return () => {
+      clearTimeout(t);
+      for (const e of events) window.removeEventListener(e, wake);
+    };
+  }, [busy]);
+
   return (
-    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}`}>
+    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}${uiIdle ? " ui-idle" : ""}`}>
       {view === "3d" && <div ref={holder} className="salon-holder" />}
 
       {/* One row: count, search, hoist. Every control is 28 px on a 4 px rhythm. */}
@@ -274,6 +358,12 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
       {high !== null && (
         <div className="salon-corner">
+          <button
+            type="button" className="bar-btn" data-sound aria-pressed={sound} onClick={toggleSound}
+            aria-label="Sonido" title={sound ? "Silenciar" : "Activar sonido"}
+          >
+            <Icon name={sound ? "sound" : "mute"} size={14} />
+          </button>
           <button
             type="button" className="bar-btn hd-btn" aria-pressed={high} onClick={toggleQuality}
             aria-label="Calidad HD" title={high ? "HD activado" : "HD apagado: más fluido"}

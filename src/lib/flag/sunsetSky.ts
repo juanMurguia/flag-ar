@@ -40,7 +40,7 @@ function makeSky(sunDir: THREE.Vector3, exposure: number, haze?: { horizon: THRE
     .replace("L0 += ( vSunE * 19000.0 * Fex ) * sundisk;", "L0 += 0.0 * sundisk;")
     // A warm tint and a wide golden glow around the sun: the Preetham model alone reads pale and cool.
     .replace("vec3 retColor =", "texColor += vec3(0.30, 0.17, 0.07) * (pow(max(cosTheta, 0.0), 8.0) * 0.012 + pow(max(cosTheta, 0.0), 120.0) * 0.12 + pow(max(cosTheta, 0.0), 30.0) * 0.05);\nvec3 retColor =")
-    .replace("gl_FragColor = vec4( retColor, 1.0 );", "vec3 skyOut = retColor * vec3(1.1, 0.92, 0.95) * uExposure;\nskyOut *= min(1.0, 2.6 / max(max(skyOut.r, skyOut.g), max(skyOut.b, 1e-4)));\nfloat hs = max(dot(direction, vSunDirection), 0.0);\nvec3 haze = uHorizon + uSunColor * (pow(hs, 6.0) * 0.55 + pow(hs, 60.0) * 1.6);\nskyOut = mix(skyOut, haze, uHazeStrength * (1.0 - smoothstep(0.0, 0.16, direction.y)));\ngl_FragColor = vec4( skyOut, 1.0 );");
+    .replace("gl_FragColor = vec4( retColor, 1.0 );", "vec3 skyOut = retColor * vec3(1.15, 0.95, 0.78) * uExposure;\nskyOut *= min(1.0, 2.6 / max(max(skyOut.r, skyOut.g), max(skyOut.b, 1e-4)));\nfloat hs = max(dot(direction, vSunDirection), 0.0);\nvec3 haze = uHorizon + uSunColor * (pow(hs, 6.0) * 0.55 + pow(hs, 60.0) * 1.6);\nskyOut = mix(skyOut, haze, uHazeStrength * (1.0 - smoothstep(0.0, 0.16, direction.y)));\ngl_FragColor = vec4( skyOut, 1.0 );");
   sky.material.needsUpdate = true;
   return sky;
 }
@@ -111,9 +111,9 @@ void main() {
     // Clear, glowing sky around the sun, as in a real sunset photo: the clouds thin out there.
     c.x *= 1.0 - smoothstep(0.82, 0.985, s) * 0.85;
     if (c.x <= 0.001) continue;
-    // Shadow side: dusky violet overhead, warm rust toward the horizon. Lit side: gold to cream.
-    vec3 shade = mix(vec3(0.5, 0.32, 0.5), vec3(0.85, 0.45, 0.42), smoothstep(0.35, 0.03, elev) * 0.7 + near * 0.6);
-    vec3 lit = mix(vec3(1.9, 1.05, 0.82), vec3(2.4, 1.7, 1.2), near);
+    // Shadow side: dusky mauve overhead, warm rust toward the horizon. Lit side: amber to gold.
+    vec3 shade = mix(vec3(0.56, 0.36, 0.42), vec3(0.9, 0.5, 0.36), smoothstep(0.35, 0.03, elev) * 0.7 + near * 0.6);
+    vec3 lit = mix(vec3(2.1, 1.3, 0.7), vec3(2.4, 1.7, 1.0), near);
     vec3 col = mix(shade, lit, c.z * (0.7 + 0.3 * (1.0 - c.y)));
     // Silver-gold rims on thin edges near the sun.
     col += uSunColor * edge * (1.0 - c.y) * 2.5;
@@ -199,7 +199,7 @@ export class SunsetSky {
     env.add(sky);
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(80, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xe8b8a0).multiplyScalar(0.9), side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf0c090).multiplyScalar(0.9), side: THREE.DoubleSide }),
     );
     floor.position.y = -3;
     env.add(floor);

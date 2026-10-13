@@ -41,8 +41,8 @@ export class Post {
   private ldrPass: EffectPass;
   private fx: PostFx;
   private size = { w: 1, h: 1 };
-  readonly exposure = new THREE.Uniform(0.62);
-  readonly saturation = new HueSaturationEffect({ saturation: 0.12 });
+  readonly exposure = new THREE.Uniform(0.7);
+  readonly saturation = new HueSaturationEffect({ saturation: 0.28 });
 
   constructor(
     private renderer: THREE.WebGLRenderer,

@@ -68,9 +68,9 @@ export function applyBacklight<M extends THREE.Material>(material: M, uniforms: 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
+        // The fold shading (wave.ts) may have declared the sun uniforms already.
         `#include <common>
-uniform vec3 uSunDir;
-uniform vec3 uSunColor;
+${shader.fragmentShader.includes("uniform vec3 uSunDir;") ? "" : "uniform vec3 uSunDir;\nuniform vec3 uSunColor;"}
 uniform float uBacklight;
 uniform float uGlow;
 ${instanced ? "varying float vGlow;" : ""}`,
@@ -89,5 +89,35 @@ ${instanced ? "varying float vGlow;" : ""}`,
       );
   };
   material.customProgramCacheKey = () => `${prevKey.call(material)}-backlight${instanced ? "-i" : ""}`;
+  return material;
+}
+
+export interface RimUniforms {
+  uRimColor: { value: THREE.Color };
+}
+
+/**
+ * Warm light on the edges the eye sees at a grazing angle: fold crests and the outline. It reads as
+ * light wrapping around the cloth from behind, without moving the sun behind the flag (that would put
+ * the face in shadow). Chain it after the wave and the backlight.
+ */
+export function applyRim<M extends THREE.Material>(material: M, uniforms: RimUniforms): M {
+  const prev = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prev.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform vec3 uRimColor;")
+      .replace(
+        "#include <aomap_fragment>",
+        `#include <aomap_fragment>
+{
+  float facing = abs(dot(normal, normalize(vViewPosition)));
+  totalEmissiveRadiance += uRimColor * pow(1.0 - facing, 3.0);
+}`,
+      );
+  };
+  material.customProgramCacheKey = () => `${prevKey.call(material)}-rim`;
   return material;
 }

@@ -21,6 +21,8 @@ export interface CloudLook {
   sunColor: THREE.Color;
   horizon: THREE.Color;
   fogDensity: number;
+  /** Pool of light on the cloud tops: world x, z, radius (m), strength. */
+  pool: THREE.Vector4;
 }
 
 const SHADE_GLSL = /* glsl */ `
@@ -61,6 +63,7 @@ uniform float uBottom;
 uniform vec3 uDeep;
 uniform vec3 uMid;
 uniform vec3 uLit;
+uniform vec4 uPool;
 uniform float uSkin;    // meters of soft, eroded cloud over the dome surface
 uniform mat4 projectionMatrix;
 varying vec3 vWorld;
@@ -168,6 +171,9 @@ void main() {
       // Sky fill from above (cool), fading with depth. Warm sun on top. Values stay low: AgX flattens hot ones.
       vec3 amb = mix(uMid, uDeep, clamp(depthIn / 6.0, 0.0, 1.0));
       vec3 c = amb + uLit * sunT * (0.55 + 0.45 * powder);
+      // The pool of light at the foot of the Argentine flag: those clouds catch the light from the break.
+      float pool = 1.0 - smoothstep(0.0, uPool.z, distance(p.xz, uPool.xy));
+      c += uLit * uPool.w * pool * pool * sunT;
       float a = 1.0 - exp(-d * 3.0 * dt);
       acc += T * a * c;
       T *= 1.0 - a;
@@ -208,11 +214,12 @@ export class CloudSea {
       new THREE.ShaderMaterial({
         uniforms: {
           uNoise: { value: noiseTexture() }, uBillow: { value: billowTexture3D() }, uSkin: { value: 2.5 },
+          uPool: { value: look.pool },
           uTime: this.time, uTop: { value: CLOUD_TOP }, uBottom: { value: CLOUD_BOTTOM },
-          // Cool sky fill in the shadows, warm sun on the tops. Kept low: AgX flattens bright values to pink.
+          // Mauve sky fill in the shadows, amber sun on the tops. Kept moderate: AgX flattens bright values to pink.
           uDeep: { value: new THREE.Vector3(0.12, 0.12, 0.2) },
-          uMid: { value: new THREE.Vector3(0.34, 0.32, 0.5) },
-          uLit: { value: new THREE.Vector3(1.3, 0.95, 0.72) },
+          uMid: { value: new THREE.Vector3(0.5, 0.38, 0.4) },
+          uLit: { value: new THREE.Vector3(1.9, 1.15, 0.58) },
           ...shadeUniforms(look),
         },
         defines: { STEPS: steps },
