@@ -15,8 +15,8 @@ const POLL_MS = 30_000;
 const FX_KEY = "flagar-hq";
 
 // One switch for visitors: they know "looks better" vs "runs smoother", not AO or bloom.
-// God rays stay off in both: they wash the sunset out.
-const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: false, hd: true };
+// God rays only in high quality: the sun is in view, low, and its rays warm the air around it.
+const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: true, hd: true };
 const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
 const SOUND_KEY = "flagar-sound";
 const UI_IDLE_MS = 4000;

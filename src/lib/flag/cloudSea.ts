@@ -21,8 +21,6 @@ export interface CloudLook {
   sunColor: THREE.Color;
   horizon: THREE.Color;
   fogDensity: number;
-  /** Pool of light on the cloud tops: world x, z, radius (m), strength. */
-  pool: THREE.Vector4;
 }
 
 const SHADE_GLSL = /* glsl */ `
@@ -31,10 +29,10 @@ uniform vec3 uSunColor;
 uniform vec3 uHorizon;
 uniform float uFogDensity;
 
-// Haze color seen along direction rd: horizon gold, brighter and whiter toward the sun.
+// Haze color seen along direction rd: dim away from the sun, horizon gold toward it, brighter near it.
 vec3 hazeColor(vec3 rd) {
   float s = max(dot(rd, uSunDir), 0.0);
-  vec3 c = uHorizon;
+  vec3 c = uHorizon * (0.35 + 0.65 * pow(s, 2.0));
   c += uSunColor * (pow(s, 6.0) * 0.55 + pow(s, 60.0) * 1.6);
   return c;
 }
@@ -63,7 +61,6 @@ uniform float uBottom;
 uniform vec3 uDeep;
 uniform vec3 uMid;
 uniform vec3 uLit;
-uniform vec4 uPool;
 uniform float uSkin;    // meters of soft, eroded cloud over the dome surface
 uniform mat4 projectionMatrix;
 varying vec3 vWorld;
@@ -72,7 +69,8 @@ ${SHADE_GLSL}
 
 // Wind carries the clouds toward +x, the way the flags fly. The noise is sampled at p - drift, so the
 // pattern moves with +drift.
-vec2 drift() { return vec2(uTime * 1.2, uTime * 0.12); }
+// Half the first speed: a slow, heavy sea reads as vast; a fast one reads as small and near.
+vec2 drift() { return vec2(uTime * 0.6, uTime * 0.06); }
 
 // Macro shape: dome surface height in [0, 1] at world xz. Four texture reads: it runs several times per
 // march step, so it is the cost that matters most.
@@ -102,7 +100,7 @@ float density(vec3 p, float surf, float detail) {
   if (inside <= 0.0) return 0.0;
   if (inside >= 1.0 || detail < 0.5) return 1.0;
   // Billows rise slowly while they travel: the edges boil instead of holding still.
-  vec3 q = vec3(p.x - drift().x, p.y - uTime * 0.15, p.z - drift().y);
+  vec3 q = vec3(p.x - drift().x, p.y - uTime * 0.08, p.z - drift().y);
   vec4 a = texture(uBillow, q / 22.0);
   vec4 b = texture(uBillow, q / 7.0);
   float billow = a.r * 0.55 + b.g * 0.3 + b.b * 0.15;   // 0..1, high in the middle of each billow
@@ -138,9 +136,11 @@ void main() {
     float surf = surfY(p.xz);
     float above = p.y - surf;
     if (above > 0.05) {
-      // Over the domes: leap toward the surface (conservative for the dome slopes), with a minimum stride.
+      // Over the domes: leap toward the surface (conservative for the dome slopes), with a minimum stride
+      // that grows with distance. The camera rides just over the tops, so its rays graze them: with a small
+      // stride they ran out of steps a few dozen meters out, and the rest of the sea showed as a flat floor.
       tPrev = t;
-      t += max(above / (-rd.y + slope * horiz), 0.3 + dist * 0.003);
+      t += max(above / (-rd.y + slope * horiz), 0.5 + dist * 0.015);
       continue;
     }
     if (!hit) {
@@ -168,12 +168,13 @@ void main() {
       float occl = max(surfY(lp.xz) - lp.y, 0.0);
       float sunT = exp(-occl * 0.9) * exp(-depthIn * 0.9);
       float powder = 1.0 - exp(-d * 2.5);                 // thin fringes scatter less back to us
-      // Sky fill from above (cool), fading with depth. Warm sun on top. Values stay low: AgX flattens hot ones.
+      // Sky fill from above (cool), fading with depth.
       vec3 amb = mix(uMid, uDeep, clamp(depthIn / 6.0, 0.0, 1.0));
-      vec3 c = amb + uLit * sunT * (0.55 + 0.45 * powder);
-      // The pool of light at the foot of the Argentine flag: those clouds catch the light from the break.
-      float pool = 1.0 - smoothstep(0.0, uPool.z, distance(p.xz, uPool.xy));
-      c += uLit * uPool.w * pool * pool * sunT;
+      // Backlit: the sun is low and ahead. Clouds toward it glow (forward scattering), most at their thin
+      // tops; the rest of the sea stays in its own cool shade. That dark foreground is what frames the sky.
+      float fwd = pow(max(dot(rd, L), 0.0), 5.0);
+      float top = 1.0 - smoothstep(0.0, 1.6, depthIn);
+      vec3 c = amb + uLit * sunT * (0.25 + 1.4 * fwd) * (0.35 + 0.65 * top) * (0.7 + 0.3 * powder);
       float a = 1.0 - exp(-d * 3.0 * dt);
       acc += T * a * c;
       T *= 1.0 - a;
@@ -182,7 +183,9 @@ void main() {
     }
     t += dt;
   }
-  acc += T * (uMid + uLit * 0.4);          // ran out of steps far away: haze covers it
+  // Ran out of steps: shade the rest like the backlit sea (dark; gold toward the sun, and only far away), so
+  // the gaps between near billows stay in shadow instead of turning into a flat, bright floor.
+  acc += T * (uMid + uLit * (0.06 + 0.9 * pow(max(dot(rd, L), 0.0), 5.0) * smoothstep(150.0, 600.0, t0 + t)));
   if (tDepth < 0.0) tDepth = t;
   vec3 pd = vWorld + rd * tDepth;
   float dist = t0 + tDepth;
@@ -214,12 +217,11 @@ export class CloudSea {
       new THREE.ShaderMaterial({
         uniforms: {
           uNoise: { value: noiseTexture() }, uBillow: { value: billowTexture3D() }, uSkin: { value: 2.5 },
-          uPool: { value: look.pool },
           uTime: this.time, uTop: { value: CLOUD_TOP }, uBottom: { value: CLOUD_BOTTOM },
-          // Mauve sky fill in the shadows, amber sun on the tops. Kept moderate: AgX flattens bright values to pink.
-          uDeep: { value: new THREE.Vector3(0.12, 0.12, 0.2) },
-          uMid: { value: new THREE.Vector3(0.5, 0.38, 0.4) },
-          uLit: { value: new THREE.Vector3(1.9, 1.15, 0.58) },
+          // Soft lavender shade (light, as clouds read: dark ones look like a storm), amber on the tops toward the sun.
+          uDeep: { value: new THREE.Vector3(0.16, 0.15, 0.24) },
+          uMid: { value: new THREE.Vector3(0.42, 0.38, 0.48) },
+          uLit: { value: new THREE.Vector3(1.5, 0.78, 0.32) },
           ...shadeUniforms(look),
         },
         defines: { STEPS: steps },

@@ -10,7 +10,7 @@
 
 const FADE_IN = 4; // s
 const FADE_OUT = 0.6; // s
-const LEVEL = 0.55;
+const LEVEL = 0.275; // master gain, half of the first mix: wind and drone sit under the page, not over it
 
 function noiseBuffer(ctx: AudioContext, seconds: number, brown: boolean) {
   const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);

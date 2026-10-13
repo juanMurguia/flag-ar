@@ -82,7 +82,17 @@ ${instanced ? "varying float vGlow;" : ""}`,
   vec3 viewDirV = normalize(vViewPosition);
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
   float back = max(dot(viewDirV, -sunV), 0.0);
-  totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uBacklight * (pow(back, 3.0) * 0.6 + pow(back, 12.0) * 1.4);
+  // How much light comes through this part of the cloth: most where the fold faces away from the sun (the
+  // light enters its back), little in the folds turned toward it. Without it the glow is flat, like card.
+  float thru = 0.25 + 0.75 * pow(max(dot(-normal, sunV), 0.0), 2.0);
+  totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uBacklight * thru * (pow(back, 3.0) * 0.6 + pow(back, 12.0) * 1.4);
+  // The sun right behind the cloth: a hot spot that shines through it in the cloth's own colors, deeper
+  // than the surface (light crosses the dye), and spreads a little around the disc.
+  vec3 dyed = diffuseColor.rgb * sqrt(diffuseColor.rgb);
+  totalEmissiveRadiance += dyed * uSunColor * uBacklight * thru * (pow(back, 1200.0) * 3.0 + pow(back, 150.0) * 1.8);
+  // Gold rim: edges and fold crests seen at a grazing angle catch the light behind them, in the sun's color.
+  float edgeRim = pow(1.0 - abs(dot(normal, viewDirV)), 3.0);
+  totalEmissiveRadiance += uSunColor * uBacklight * 0.5 * edgeRim * pow(back, 4.0);
   float glow = ${instanced ? "max(uGlow, vGlow)" : "uGlow"};
   totalEmissiveRadiance += (diffuseColor.rgb * 0.6 + vec3(0.5, 0.42, 0.3)) * glow;
 }`,
@@ -119,5 +129,38 @@ export function applyRim<M extends THREE.Material>(material: M, uniforms: RimUni
       );
   };
   material.customProgramCacheKey = () => `${prevKey.call(material)}-rim`;
+  return material;
+}
+
+export interface SunRimUniforms {
+  uRimSunDir: { value: THREE.Vector3 };
+  uRimSunColor: { value: THREE.Color };
+  uSunRim: { value: number };
+}
+
+/**
+ * Gold rim on any lit material (the poles): its outline glows where it stands against the sun, as a
+ * backlit pole does in a photo. Strongest when the eye looks toward the sun; zero with the sun behind.
+ */
+export function applySunRim<M extends THREE.Material>(material: M, uniforms: SunRimUniforms): M {
+  const prev = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prev.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform vec3 uRimSunDir;\nuniform vec3 uRimSunColor;\nuniform float uSunRim;")
+      .replace(
+        "#include <aomap_fragment>",
+        `#include <aomap_fragment>
+{
+  vec3 toEye = normalize(vViewPosition);
+  vec3 sunV = normalize((viewMatrix * vec4(uRimSunDir, 0.0)).xyz);
+  float against = pow(max(dot(toEye, -sunV), 0.0), 4.0);
+  totalEmissiveRadiance += uRimSunColor * uSunRim * against * pow(1.0 - abs(dot(normal, toEye)), 2.5);
+}`,
+      );
+  };
+  material.customProgramCacheKey = () => `${prevKey.call(material)}-sunrim`;
   return material;
 }

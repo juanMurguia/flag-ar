@@ -12,47 +12,59 @@
 // - Empty slots hold muted "tu startup acá" flags, so the hall never looks empty.
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
+import { Birds } from "./birds";
+import { ClothSim, type WindLook } from "./cloth";
 import { CLOUD_BOTTOM, CLOUD_TOP, CloudSea } from "./cloudSea";
-import { applyBacklight, applyRim, weaveNormalMap, type BacklightUniforms } from "./fabric";
+import { applyBacklight, applyRim, applySunRim, weaveNormalMap, type BacklightUniforms } from "./fabric";
 import { Motes } from "./motes";
 import { poleMaterials } from "./pole";
 import { Post, type PostFx } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
 import { createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
-import { applyWave, flagGeometry, foldUniforms, waveUniforms, type FoldUniforms, type WaveUniforms } from "./wave";
+import { applyWave, flagGeometry, waveUniforms, type FoldUniforms, type WaveUniforms } from "./wave";
 
 // ---------- Layout (meters) ----------
 const FLAG_W = 3.1, FLAG_H = 2.0;
 const POLE_H = 4; // above y = 0: the flag rides just over the cloud tops; the flags matter, not the poles
 const POLE_DEPTH = CLOUD_TOP - CLOUD_BOTTOM + 3; // below them, out of sight
-// The hero: about twice the height and size of the others, so it towers over the low camera.
-const ARG_POLE_H = POLE_H * 1.9;
+// The hero: its pole rises far above the field, so the flag flies high in the frame, over every other
+// flag, like a flag on a summit. The cloth is about twice the size of the others.
+const ARG_POLE_H = POLE_H * 2.7;
 const ARG_W = FLAG_W * 2.2, ARG_H = FLAG_H * 2.2;
 const CORRIDOR = 6; // half-width of the empty corridor down the middle
 const DX = 5, DZ = 5.5;
 const FIRST_Z = -2;
 const ARG_ROWS_IN = 3.5; // the Argentine flag stands this many rows down the corridor
 const ARG_Z = FIRST_Z - ARG_ROWS_IN * DZ;
-const ARG_X = -ARG_W * 0.45; // pole left of center, so the cloth sits near the middle of the corridor
+const ARG_X = -ARG_W / 2; // pole left of the axis by half the cloth: the cloth centers on the corridor
 const ARG_CENTER = new THREE.Vector3(ARG_X + ARG_W / 2, ARG_POLE_H - 0.25 - ARG_H / 2, ARG_Z);
 
 // ---------- Look ----------
-const SUN_ELEVATION = 12;
-const SUN_AZIMUTH = 250; // behind the camera and to the right: lights the flag faces, rakes the cloud tops
+// Contre-jour, as in a golden-hour photo: the sun sits low in the start view, right behind the Argentine
+// flag. The cloth is translucent (fabric.ts): the sun shines through it in its own colors, and peeks out
+// past the fly end as it waves. A warm spot keeps the face readable.
+const SUN_ELEVATION = 6.5;
+const SUN_AZIMUTH = 3.5; // behind the fly end of the Argentine flag in the start view: it peeks out as the cloth waves
 const HORIZON = new THREE.Color(0xf6c07a); // golden hour: amber haze, not the rose of late dusk
-// The focal light: a warm spot on the Argentine flag and a pool of light on the clouds at its foot.
-const SPOT_GAIN = 5;
-const POOL = new THREE.Vector4(ARG_CENTER.x, ARG_Z, 18, 0.55); // lit clouds at the hero's foot: x, z, radius, strength
-const ARG_WIND = 1.35; // over 1: the hero flies in a stronger wind than the field
+// A warm spot on the Argentine flag keeps its face readable against the sun.
+const SPOT_GAIN = 2.5; // low: more, and the front light flattens the light coming through the cloth
+// The hero is a cloth simulation (cloth.ts), not a wave formula: wind speed in m/s, how hard the air carries
+// the cloth downwind, and how hard it pushes tilted patches. Tuned so the flag flies near level and billows.
+const ARG_CLOTH: WindLook = { speed: 11, drag: 2.2, lift: 3.2 };
+const ARG_SEGS: [number, number] = [35, 23];
 const ARG_RIM = 0.35;
-const MOTE_GAIN = 1.8; // HDR, added per speck. Deep amber: AgX whitens bright points, and white specks read as snow
-const FOG_DENSITY = 0.0065; // aerial perspective: the far rows fade into the haze, so the hall reads as huge
+const POLE_RIM = 1.6; // gold outline on the poles against the sun
+const BIRD_FLOCKS = 3;
+const MOTE_GAIN = 1.0; // HDR, added per speck. Deep amber: bright points tone-map to white, and white specks read as snow
+const FOG_DENSITY = 0.0012; // light: haze toward a low sun washes the whole frame out
 
 // ---------- Camera ----------
-// Low and a little back, on a long lens, looking up: the eye sits just over the cloud tops, the horizon
-// falls in the lower third, the Argentine flag towers, and the telephoto packs the rows behind it.
-const START = new THREE.Vector3(0, 2.9, 20);
-const START_PITCH = 0.07;
+// Low and back, on a long lens, looking level: the eye sits just over the cloud tops, so the dark backlit
+// billows fill the foreground (the frame's shadow), the Argentine flag flies high above the field, and the
+// telephoto packs the rows behind it.
+const START = new THREE.Vector3(0, 2.9, 26);
+const START_PITCH = 0.04;
+const START_YAW = 0; // straight down the corridor: the Argentine flag on the center line
 const FOV = 32;
 // Opening shot: the camera cranes down from high and far back to the start view.
 const INTRO_FROM = new THREE.Vector3(0, 11, 54);
@@ -69,7 +81,7 @@ const TILE_BLANK = 0, TILE_PLACEHOLDER = 1;
 // Empty slots: plain undyed cloth, a few warm whites so the field does not look printed. The color
 // belongs to the startups and the Argentine flag.
 const PLACEHOLDER_COLORS = ["#fbfaf8", "#f6f5f3", "#fdfcfb", "#f3f2f1"]; // near white: the warm sunset tints them cream on its own
-const PLACEHOLDER_LIFT = 1.4; // over 1 on purpose: Lambert under the low sun reads white cloth as cardboard; higher turns it orange in the amber light
+const PLACEHOLDER_LIFT = 0.8; // under 1: backlit, the empty field glows gold but stays darker than the hero
 const FRONT_MARKS = 8; // the first empty slots (the best seats) show the "tu startup acá" mark; the rest only on hover
 const HOVER_GLOW = 0.1;
 const EASE_HOVER = 7; // 1/s
@@ -91,10 +103,10 @@ function startTier(): Tier {
   return coarse || small ? "low" : "high";
 }
 
-/** Default effects for this device: everything but god rays on desktops, only bloom on phones. */
+/** Default effects for this device: everything on desktops, only bloom on phones. */
 export function defaultFx(): SalonFx {
   const high = startTier() === "high";
-  return { ao: high, bloom: true, godRays: false, hd: high };
+  return { ao: high, bloom: true, godRays: high, hd: high };
 }
 
 export interface SalonEvents {
@@ -172,6 +184,7 @@ export class SalonScene {
   sky: SunsetSky;
   clouds: CloudSea;
   private motes: Motes;
+  private birds: Birds;
   post: Post;
   private tier: Tier;
   private fx: SalonFx;
@@ -187,6 +200,7 @@ export class SalonScene {
   private resizeObserver: ResizeObserver;
 
   // Instanced layers
+  private poleMats: { metal: THREE.MeshStandardMaterial; gold: THREE.MeshStandardMaterial; finial: THREE.MeshStandardMaterial } | null = null;
   private shafts: THREE.InstancedMesh | null = null;
   private finials: THREE.InstancedMesh | null = null;
   private far: THREE.InstancedMesh | null = null;
@@ -206,6 +220,8 @@ export class SalonScene {
 
   private near: NearFlag[] = [];
   private argUniforms: WaveUniforms & BacklightUniforms;
+  private argCloth: ClothSim | null = null;
+  private argGeo: THREE.BufferGeometry | null = null;
   private images = new Map<string, LogoImage | "loading" | "error">();
   private lodTimer = 0;
   private knownIds: Set<string> | null = null;
@@ -220,11 +236,11 @@ export class SalonScene {
 
   // Camera
   private pos = START.clone();
-  private yaw = 0; // 0 looks down the corridor (-z), toward the sun
+  private yaw = START_YAW; // 0 looks straight down the corridor (-z)
   private pitch = START_PITCH;
   // Input moves these goals; the camera eases toward them each frame.
   private goalPos = START.clone();
-  private goalYaw = 0;
+  private goalYaw = START_YAW;
   private goalPitch = START_PITCH;
   private flight: {
     from: THREE.Vector3; to: THREE.Vector3; yaw0: number; yaw1: number; p0: number; p1: number; t: number; dur: number;
@@ -261,33 +277,37 @@ export class SalonScene {
     container.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 40000);
-    // Sun low and behind the camera: it lights the flags from the front, and it is never in the start view.
     this.sunDir = sunDirection(SUN_ELEVATION, SUN_AZIMUTH);
 
     this.scene.fog = new THREE.FogExp2(HORIZON.clone(), FOG_DENSITY);
     this.scene.background = HORIZON.clone();
-    this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, }, 1);
+    this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON });
     this.scene.add(this.sky.group);
     this.scene.environment = this.sky.environment(renderer);
-    // Bright sky fill: the glowing horizon faces the flags, so their shaded flanks stay light, not near black.
-    this.scene.environmentIntensity = 1.1;
-    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY, pool: POOL }, t.steps);
+    // Low sky fill: contre-jour needs real shadow. More fill flattens it back to a grey haze.
+    this.scene.environmentIntensity = 0.45;
+    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY }, t.steps);
     this.scene.add(this.clouds.group);
     // Golden dust in the air, lit by the low sun. Count by device tier, fixed for the session.
-    this.motes = new Motes(t.motes, new THREE.Color(1, 0.55, 0.2).multiplyScalar(MOTE_GAIN));
+    this.motes = new Motes(t.motes, new THREE.Color(1, 0.5, 0.15).multiplyScalar(MOTE_GAIN));
     this.scene.add(this.motes.points);
+    // Far flocks crossing the sky, as silhouettes against the sun. Random per visit.
+    this.birds = new Birds(BIRD_FLOCKS, START.z, new THREE.Color(0.05, 0.04, 0.05), HORIZON.clone().multiplyScalar(1.2));
+    this.scene.add(this.birds.mesh);
 
     const sun = new THREE.DirectionalLight(0xffc27a, 2.1);
     sun.position.copy(this.sunDir).multiplyScalar(100);
     this.scene.add(sun);
     // A cool sky fill over a warm cloud bounce: the cool keeps the shadows from going muddy orange.
-    this.scene.add(new THREE.HemisphereLight(0xc4cbe0, 0xf2b070, 0.8));
+    this.scene.add(new THREE.HemisphereLight(0xc4cbe0, 0xf2b070, 0.35));
 
     const bl = (): BacklightUniforms => ({
       uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: 1.6 }, uGlow: { value: 0 },
     });
     this.argUniforms = { ...waveUniforms(ARG_W, ARG_H, 0.6), ...bl() };
     this.farUniforms = { ...waveUniforms(FLAG_W, FLAG_H), ...bl() };
+    // The field glows a little less than the hero: backlit cloth, but the hero stays the brightest flag.
+    this.farUniforms.uBacklight.value = 1.1;
     this.buildArgentina();
 
     this.atlasCanvas = createCanvas(ATLAS_TILE[0] * ATLAS_COLS, ATLAS_TILE[1] * ATLAS_COLS);
@@ -332,13 +352,13 @@ export class SalonScene {
     this.slots = gridSlots(cols, rows);
 
     // Brushed, weathered aluminium (shared with the pair page), not chrome: at this distance a mirror finish reads as CG.
-    const { metal } = poleMaterials();
+    const metal = this.rimmed().metal;
     const shaftGeo = new THREE.CylinderGeometry(0.055, 0.075, POLE_H + POLE_DEPTH, 12, 1, true);
     shaftGeo.translate(0, (POLE_H - POLE_DEPTH) / 2, 0);
     this.shafts = new THREE.InstancedMesh(shaftGeo, metal, count);
     const finialGeo = new THREE.SphereGeometry(0.12, 10, 6);
     finialGeo.translate(0, POLE_H + 0.1, 0);
-    this.finials = new THREE.InstancedMesh(finialGeo, new THREE.MeshStandardMaterial({ color: 0xc4c9d1, metalness: 0.85, roughness: 0.55, envMapIntensity: 0.7 }), count);
+    this.finials = new THREE.InstancedMesh(finialGeo, this.rimmed().finial, count);
 
     const farGeo = flagGeometry(FLAG_W, FLAG_H, 14, 7);
     const phases = new Float32Array(count);
@@ -569,7 +589,7 @@ export class SalonScene {
 
   /** Back to the start view, facing the sun and the Argentine flag. */
   home() {
-    const look = this.lookFrom(START, 0, START_PITCH);
+    const look = this.lookFrom(START, START_YAW, START_PITCH);
     this.flyTo(START.clone(), look, null);
     this.setHighlight([]);
   }
@@ -584,7 +604,7 @@ export class SalonScene {
     this.goalPos.copy(INTRO_FROM);
     this.pitch = this.goalPitch = INTRO_PITCH;
     this.flight = {
-      from: INTRO_FROM.clone(), to: START.clone(), yaw0: 0, yaw1: 0, p0: INTRO_PITCH, p1: START_PITCH, t: 0, dur: INTRO_DUR,
+      from: INTRO_FROM.clone(), to: START.clone(), yaw0: START_YAW, yaw1: START_YAW, p0: INTRO_PITCH, p1: START_PITCH, t: 0, dur: INTRO_DUR,
       select: null, intro: true,
     };
   }
@@ -632,6 +652,7 @@ export class SalonScene {
     this.post.dispose();
     this.clouds.dispose();
     this.motes.dispose();
+    this.birds.dispose();
     this.sky.dispose();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -650,8 +671,27 @@ export class SalonScene {
 
   // ---------- Build ----------
 
+  /**
+   * Pole materials with a gold rim against the sun, built once and kept across layouts. Shafts and field
+   * finials are painted white: bare metal goes near black against the sun. A faint warm emissive stands for
+   * the sky light a white pole picks up. The hero keeps its gilt finial (a copy of the pair page one).
+   */
+  private rimmed() {
+    if (!this.poleMats) {
+      const { gold } = poleMaterials();
+      const rim = () => ({ uRimSunDir: { value: this.sunDir }, uRimSunColor: { value: this.sunColor }, uSunRim: { value: POLE_RIM } });
+      const paint = () => new THREE.MeshStandardMaterial({ color: 0xf2f2f0, metalness: 0.05, roughness: 0.45, emissive: 0x2a2826 });
+      this.poleMats = {
+        metal: applySunRim(paint(), rim()),
+        gold: applySunRim(gold.clone(), rim()),
+        finial: applySunRim(paint(), rim()),
+      };
+    }
+    return this.poleMats;
+  }
+
   private buildArgentina() {
-    const { metal, gold } = poleMaterials();
+    const { metal, gold } = this.rimmed();
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, ARG_POLE_H + POLE_DEPTH, 16, 1, true), metal);
     shaft.position.set(ARG_X, (ARG_POLE_H - POLE_DEPTH) / 2, ARG_Z);
     const finial = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10), gold);
@@ -663,12 +703,13 @@ export class SalonScene {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    // The hero gets the heavy-cloth wave of the pair page (diagonal folds, a bellying hoist, a snapping
-    // fly end) in stronger wind, with fold shading and a gold rim. The field keeps the cheaper gust wave.
-    this.argUniforms.uWind.value = ARG_WIND;
-    const mat = this.fabricMaterial(tex, this.argUniforms, foldUniforms(this.sunDir, this.sunColor, 0.35));
+    // The hero is simulated cloth (cloth.ts): the CPU moves the vertices each frame, so the material has no
+    // wave. Translucency and a gold rim as for the field. The field keeps the cheap vertex-shader wave.
+    const mat = this.fabricMaterial(tex, this.argUniforms, null, false);
     applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
-    const flag = new THREE.Mesh(flagGeometry(ARG_W, ARG_H, 72, 44), mat);
+    this.argGeo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
+    this.argCloth = new ClothSim(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1], ARG_CLOTH);
+    const flag = new THREE.Mesh(this.argGeo, mat);
     flag.frustumCulled = false;
     flag.position.set(ARG_X + 0.12, ARG_POLE_H - 0.25, ARG_Z);
     this.scene.add(flag);
@@ -680,8 +721,8 @@ export class SalonScene {
     this.scene.add(spot, spot.target);
   }
 
-  /** `fold`: fold shading and sun through the cloth (the hero only). Without it, the field's gust wave. */
-  private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms, fold: FoldUniforms | null = null) {
+  /** `fold`: fold shading and sun through the cloth. Without it, the field's gust wave. `wave` false: no motion (simulated cloth). */
+  private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms, fold: FoldUniforms | null = null, wave = true) {
     const normal = weaveNormalMap();
     const mat = new THREE.MeshPhysicalMaterial({
       map, side: THREE.DoubleSide, roughness: 0.94, metalness: 0, specularIntensity: 0.12,
@@ -689,7 +730,7 @@ export class SalonScene {
       normalMap: normal, normalScale: new THREE.Vector2(0.12, 0.12),
     });
     mat.normalMap!.repeat.set(36, 24);
-    applyWave(mat, uniforms, false, !fold, fold);
+    if (wave) applyWave(mat, uniforms, false, !fold, fold);
     return applyBacklight(mat, uniforms);
   }
 
@@ -1063,6 +1104,8 @@ export class SalonScene {
     this.sky.update(this.time, this.camera);
     this.clouds.update(this.time, this.camera);
     this.motes.update(this.time);
+    this.birds.update(this.time);
+    if (this.argCloth && this.argGeo) this.argCloth.update(dt, this.argGeo);
 
     // Rising flags and highlight pulse.
     if (this.rising.size && this.far) {
