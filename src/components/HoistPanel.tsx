@@ -25,7 +25,8 @@ export interface HoistStage {
 
 /**
  * "Izar mi bandera": side panel (bottom sheet on phones). A pole shows a live preview while
- * the form fills in. No sign-in: the server limits by IP, and the magic link proves ownership later.
+ * the form fills in. No sign-in: the server limits by IP. Later changes go through a change request
+ * that an admin approves.
  */
 export default function HoistPanel({
   scene, webgl, closing = false, onClose, onClosed, doneExtra,

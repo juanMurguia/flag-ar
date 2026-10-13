@@ -11,7 +11,7 @@ import Icon from "./Icon";
 
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
 
-/** flag.ar/<slug>: both poles, the startup's data, share, downloads, report, and edit by magic link. */
+/** flag.ar/<slug>: both poles, the startup's data, share, downloads, a change request, and report. */
 export default function StartupView({ startup }: { startup: PublicStartup }) {
   const holder = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -19,7 +19,7 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
   const { scene, webgl } = usePairScene(holder, () => togglePauseRef.current());
   const { paused, togglePause } = usePause(scene);
   togglePauseRef.current = togglePause;
-  const [panel, setPanel] = useState<"none" | "downloads" | "edit" | "report">("none");
+  const [panel, setPanel] = useState<"none" | "downloads" | "report">("none");
   useDockInset(dock, scene, !!webgl);
   const url = `${SITE}/${startup.slug}`;
 
@@ -70,10 +70,7 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
                   onClick={() => setPanel(panel === "downloads" ? "none" : "downloads")}
                 >Descargas</button>
               )}
-              <button
-                type="button" className="linklike" aria-expanded={panel === "edit"}
-                onClick={() => setPanel(panel === "edit" ? "none" : "edit")}
-              >Editar</button>
+              <Link className="linklike" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
               <button
                 type="button" className="linklike" aria-expanded={panel === "report"}
                 onClick={() => setPanel(panel === "report" ? "none" : "report")}
@@ -83,7 +80,6 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
           {panel !== "none" && (
             <div className="reveal" key={panel}>
               {panel === "downloads" && <Downloads scene={scene} slug={startup.slug} />}
-              {panel === "edit" && <EditRequest slug={startup.slug} domain={startup.domain} />}
               {panel === "report" && <ReportForm id={startup.id} />}
             </div>
           )}
@@ -91,37 +87,6 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
         <Toolbar scene={scene} webgl={webgl} paused={paused} togglePause={togglePause} fileName={`flagar-${startup.slug}.png`} />
       </div>
     </main>
-  );
-}
-
-function EditRequest({ slug, domain }: { slug: string; domain: string }) {
-  const [email, setEmail] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (domain.includes("/")) {
-    return <p className="mini-form">Las banderas con link de X se editan escribiendo a hola@flag.ar.</p>;
-  }
-  return (
-    <form
-      className="mini-form"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setBusy(true);
-        const res = await fetch("/api/startups/edit-link", {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug, email }),
-        }).catch(() => null);
-        const body = (await res?.json().catch(() => ({}))) as { message?: string } | undefined;
-        setMsg(body?.message ?? "Error de red.");
-        setBusy(false);
-      }}
-    >
-      <label className="field">
-        <span>Tu mail de @{domain}</span>
-        <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={`vos@${domain}`} />
-      </label>
-      <button className="btn primary" disabled={busy}>Mandame el link mágico</button>
-      {msg && <p role="status">{msg}</p>}
-    </form>
   );
 }
 

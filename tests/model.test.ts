@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { signEditToken, verifyEditToken } from "@/lib/server/editToken";
 import {
-  cleanCategory, cleanName, contrast, defaultBackground, dominantColor, emailMatchesDomain, isValidSlug,
+  cleanCategory, cleanName, contrast, defaultBackground, dominantColor, isValidSlug,
   normalizeStartupLink, slugify,
 } from "@/lib/startups/model";
 import { gridSize, gridSlots, phaseOf } from "@/lib/flag/salon";
@@ -49,16 +48,6 @@ describe("normalizeStartupLink", () => {
   });
 });
 
-describe("emailMatchesDomain", () => {
-  it("accepts the domain and its subdomains only", () => {
-    expect(emailMatchesDomain("ana@pampa.com.ar", "pampa.com.ar")).toBe(true);
-    expect(emailMatchesDomain("ana@mail.pampa.com.ar", "pampa.com.ar")).toBe(true);
-    expect(emailMatchesDomain("ana@evilpampa.com.ar", "pampa.com.ar")).toBe(false);
-    expect(emailMatchesDomain("ana@pampa.com.ar.evil.io", "pampa.com.ar")).toBe(false);
-    expect(emailMatchesDomain("ana@x.com", "x.com/pampa")).toBe(false);
-  });
-});
-
 describe("default flag color", () => {
   const px = (rgb: number[], n = 100) => Array.from({ length: n }, () => [...rgb, 255]).flat();
   it("inverts the dominant color", () => {
@@ -71,21 +60,6 @@ describe("default flag color", () => {
   });
   it("measures WCAG contrast", () => {
     expect(contrast([0, 0, 0], [255, 255, 255])).toBeCloseTo(21, 0);
-  });
-});
-
-describe("edit tokens", () => {
-  const secret = "s".repeat(32);
-  const claims = { sid: "abc", v: 2, em: "a@b.c", exp: Math.floor(Date.now() / 1000) + 60 };
-  it("round-trips", () => {
-    expect(verifyEditToken(signEditToken(claims, secret), secret)).toEqual(claims);
-  });
-  it("rejects a changed payload, a wrong secret, and an expired token", () => {
-    const t = signEditToken(claims, secret);
-    const forged = Buffer.from(JSON.stringify({ ...claims, sid: "other" })).toString("base64url") + "." + t.split(".")[1];
-    expect(verifyEditToken(forged, secret)).toBeNull();
-    expect(verifyEditToken(t, "x".repeat(32))).toBeNull();
-    expect(verifyEditToken(signEditToken({ ...claims, exp: 1 }, secret), secret)).toBeNull();
   });
 });
 

@@ -563,6 +563,7 @@ h1, h2 { text-wrap: balance; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
+.facts dd.changed { font-weight: 700; } /* change requests: the fields the founder changed */
 .actions { display: flex; gap: 10px; }
 .deny { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
 

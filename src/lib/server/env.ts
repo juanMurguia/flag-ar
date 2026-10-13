@@ -19,11 +19,6 @@ export const env = {
   upstashUrl: () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
   upstashToken: () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
   slackWebhook: () => process.env.SLACK_WEBHOOK_URL,
-  /** Signs magic edit links. Long random string, separate from the IP salt. */
-  editTokenSecret: () => required("EDIT_TOKEN_SECRET"),
-  /** Resend API key for magic links. Without it, links go to the server log (dev only). */
-  resendKey: () => process.env.RESEND_API_KEY,
-  emailFrom: () => process.env.EMAIL_FROM || "flag.ar <hola@flag.ar>",
   siteUrl: () => (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, ""),
   /** Comma-separated list of origins allowed to POST to /api/upload. */
   allowedOrigins: () =>

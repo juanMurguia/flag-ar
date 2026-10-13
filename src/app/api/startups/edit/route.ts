@@ -1,93 +1,73 @@
-import { after } from "next/server";
-import { verifyEditToken } from "@/lib/server/editToken";
-import { env } from "@/lib/server/env";
+import { randomUUID } from "node:crypto";
+import { alert } from "@/lib/server/alerts";
 import { allowedOrigin, readForm, reply } from "@/lib/server/http";
-import { LOGO_MAX_BYTES, logoPath, moderateLogo, reencodeLogo, storeLogo } from "@/lib/server/logo";
+import { LOGO_MAX_BYTES, reencodeLogo, storeLogo } from "@/lib/server/logo";
 import { hashIp, limit } from "@/lib/server/ratelimit";
-import { invalidate } from "@/lib/server/startups";
 import { BUCKET_PUBLIC, serviceClient } from "@/lib/server/supabase";
 import { clientIp, sniffImage } from "@/lib/server/validate";
-import { cleanCategory, cleanName, isHexColor } from "@/lib/startups/model";
+import { cleanCategory, cleanName, isHexColor, isValidSlug } from "@/lib/startups/model";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const MAX_BODY = LOGO_MAX_BYTES + 16 * 1024;
-const EXPIRED = "El link venció o ya se usó. Pedí uno nuevo.";
 
-/** Checks a magic link token. GET answers what the edit form needs. */
-async function claimsFrom(token: string) {
-  const c = verifyEditToken(token, env.editTokenSecret());
-  if (!c) return null;
-  const { data } = await serviceClient()
-    .from("startups").select("id, slug, name, category, bg_color, logo_path, edit_version, status")
-    .eq("id", c.sid).maybeSingle();
-  if (!data || data.edit_version !== c.v || data.status === "rejected") return null;
-  return { claims: c, row: data };
-}
-
-export async function GET(req: Request) {
-  const token = req.headers.get("x-edit-token") ?? "";
-  const r = await claimsFrom(token);
-  if (!r) return reply(401, { message: EXPIRED });
-  return reply(200, {
-    slug: r.row.slug, name: r.row.name, category: r.row.category, bgColor: r.row.bg_color,
-    logoUrl: r.row.logo_path ? `/files/${r.row.logo_path}` : null,
-  });
-}
-
-/** Applies one edit. A new logo sends the flag back to review (it stays on its own URL meanwhile). */
+/**
+ * "Pedir un cambio": stores a change request for a flag. Nothing changes on the flag itself; an admin
+ * applies the request or discards it (/api/admin/edits). Anyone can ask, so the admin is the check.
+ */
 export async function POST(req: Request) {
   if (!allowedOrigin(req)) return reply(403, { message: "Forbidden." });
-  const rl = await limit("edit-ip", hashIp(clientIp(req.headers)), 10, "1 h");
-  if (!rl.ok) return reply(429, { message: "Demasiados intentos." }, { "retry-after": String(rl.retryAfter) });
+  const ipHash = hashIp(clientIp(req.headers));
+  const rl = await limit("editreq-ip", ipHash, 5, "1 h");
+  if (!rl.ok) return reply(429, { message: "Demasiados pedidos. Probá más tarde." }, { "retry-after": String(rl.retryAfter) });
 
   const form = await readForm(req, MAX_BODY);
   if (!form) return reply(400, { message: "Pedido inválido." });
-  const r = await claimsFrom(String(form.get("token") ?? ""));
-  if (!r) return reply(401, { message: EXPIRED });
-
+  const slug = String(form.get("slug") ?? "");
   const name = cleanName(form.get("name"));
   const category = cleanCategory(form.get("category"));
   const bg = String(form.get("bg") ?? "").toLowerCase();
-  if (!name || !category || !isHexColor(bg)) return reply(400, { message: "Revisá nombre, categoría y color." });
+  const note = String(form.get("note") ?? "").trim().slice(0, 500) || null;
+  if (!isValidSlug(slug) || !name || !category || !isHexColor(bg)) return reply(400, { message: "Revisá nombre, categoría y color." });
 
   const db = serviceClient();
-  const version = r.claims.v + 1;
-  const patch: Record<string, unknown> = {
-    name, category, bg_color: bg, edit_version: version, updated_at: new Date().toISOString(),
-  };
+  const { data: s, error } = await db
+    .from("startups").select("id, slug, name, category, bg_color").eq("slug", slug).neq("status", "rejected").maybeSingle();
+  if (error) return reply(500, { message: "Probá más tarde." });
+  if (!s) return reply(404, { message: "No encontramos esa bandera." });
 
-  let newLogo: { path: string; png: Buffer } | null = null;
+  // Per-flag cap too, so nobody buries the review queue under one flag from many IPs.
+  const perFlag = await limit("editreq-flag", s.id as string, 5, "24 h");
+  if (!perFlag.ok) return reply(429, { message: "Esta bandera ya tiene pedidos pendientes. Esperá la revisión." });
+
+  const id = randomUUID();
+  let logo: { path: string; hash: string } | null = null;
   const file = form.get("logo");
   if (file instanceof File && file.size > 0) {
     const raw = new Uint8Array(await file.arrayBuffer());
     if (!sniffImage(raw)) return reply(415, { message: "Usá un PNG, JPG o SVG." });
     try {
       const { png, hash } = await reencodeLogo(raw);
-      const path = logoPath(r.row.id as string, version);
+      const path = `r/${id}.png`;
       await storeLogo(path, png);
-      newLogo = { path, png };
-      Object.assign(patch, { logo_path: path, file_hash: hash, nsfw_score: null, status: "pending", approved_at: null });
+      logo = { path, hash };
     } catch {
       return reply(422, { message: "No pudimos leer esa imagen." });
     }
   }
 
-  // Optimistic lock on edit_version: two tabs with the same link cannot both win.
-  const { data: updated, error } = await db
-    .from("startups").update(patch).eq("id", r.row.id).eq("edit_version", r.claims.v).select("id");
-  if (error || !updated?.length) {
-    if (newLogo) await db.storage.from(BUCKET_PUBLIC).remove([newLogo.path]);
-    return reply(409, { message: EXPIRED });
-  }
-  if (newLogo && r.row.logo_path) await db.storage.from(BUCKET_PUBLIC).remove([r.row.logo_path as string]);
+  const same = name === s.name && category === s.category && bg === s.bg_color;
+  if (same && !logo && !note) return reply(400, { message: "No cambiaste nada." });
 
-  invalidate(r.row.slug as string);
-  if (newLogo) {
-    const { path, png } = newLogo;
-    after(() => moderateLogo(r.row.id as string, r.row.slug as string, path, png));
+  const { error: insErr } = await db.from("edit_requests").insert({
+    id, startup_id: s.id, name, category, bg_color: bg, logo_path: logo?.path ?? null, file_hash: logo?.hash ?? null, note, ip_hash: ipHash,
+  });
+  if (insErr) {
+    if (logo) await db.storage.from(BUCKET_PUBLIC).remove([logo.path]);
+    return reply(500, { message: "No pudimos guardar el pedido." });
   }
-  return reply(200, { slug: r.row.slug, message: newLogo ? "Listo. El logo nuevo vuelve a revisión para el salón." : "Listo." });
+  await alert(`edit:${s.id}`, `Change request for /${s.slug}. Review it in the admin (Edits).`, 600);
+  return reply(200, { message: "Listo. Recibimos tu pedido: lo revisamos y, si está bien, lo aplicamos." });
 }

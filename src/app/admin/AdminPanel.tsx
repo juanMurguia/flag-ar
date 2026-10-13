@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserClient } from "@/lib/client/supabase";
 import { categoryLabel } from "@/lib/startups/model";
+import EditQueue from "./EditQueue";
 
 type Status = "pending" | "approved" | "rejected";
-type Filter = Status | "reported";
+type Filter = Status | "reported" | "edits";
 
 interface Row {
   id: string;
@@ -30,6 +31,7 @@ const FILES_BASE = process.env.NEXT_PUBLIC_FILES_BASE || "/files";
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "pending", label: "Pending" },
   { key: "reported", label: "Reported" },
+  { key: "edits", label: "Edits" },
   { key: "approved", label: "Approved" },
   { key: "rejected", label: "Rejected" },
 ];
@@ -58,6 +60,11 @@ export default function AdminPanel() {
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
   const load = useCallback(async () => {
+    if (filter === "edits") {
+      // Change requests have their own list (EditQueue); the flag list and its keys stand down.
+      setRows([]);
+      return;
+    }
     let q = sb.from("startups")
       .select("id, slug, name, city, category, link, domain, logo_path, bg_color, order_number, status, featured, created_at, nsfw_score, report_count, reject_reason");
     q = filter === "reported" ? q.gt("report_count", 0).neq("status", "rejected") : q.eq("status", filter);
@@ -163,7 +170,9 @@ export default function AdminPanel() {
 
       {notice && <p className="notice" role="status" onClick={() => setNotice(null)}>{notice}</p>}
 
-      <div className="admin-body">
+      {filter === "edits" && <EditQueue sb={sb} onNotice={setNotice} />}
+
+      {filter !== "edits" && <div className="admin-body">
         <ul className="queue" aria-label="Flags">
           {rows.length === 0 && <li className="empty">Nothing here.</li>}
           {rows.map((r) => (
@@ -251,7 +260,7 @@ export default function AdminPanel() {
             )}
           </aside>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -133,15 +133,6 @@ function xLink(handle: string): StartupLinkResult {
   return { ok: true, url: `https://x.com/${handle}`, domain: `x.com/${h}`, kind: "x" };
 }
 
-/** True when the email's domain is the startup's domain or a subdomain of it. X profiles never match. */
-export function emailMatchesDomain(email: string, domain: string): boolean {
-  if (domain.includes("/")) return false;
-  const m = email.trim().toLowerCase().match(/^[^\s@]{1,64}@([a-z0-9.-]{1,253})$/);
-  if (!m) return false;
-  const host = m[1];
-  return host === domain || host.endsWith(`.${domain}`);
-}
-
 // ---------- Colors ----------
 
 export type RGB = [number, number, number];

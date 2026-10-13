@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ACCEPT, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
 import { CATEGORIES } from "@/lib/startups/model";
-
-let captured: string | null = null;
 
 interface Current {
   slug: string;
@@ -14,41 +12,17 @@ interface Current {
   logoUrl: string | null;
 }
 
-/** Magic-link edit form. One edit per link: the server bumps the version on save. */
-export default function EditForm({ slug }: { slug: string }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [cur, setCur] = useState<Current | null>(null);
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("");
-  const [bg, setBg] = useState("#ffffff");
+/** Change request form. Sends the flag as the founder wants it; an admin applies it or not. */
+export default function EditForm({ current: cur }: { current: Current }) {
+  const [name, setName] = useState(cur.name);
+  const [category, setCategory] = useState(cur.category ?? "");
+  const [bg, setBg] = useState(cur.bgColor);
+  const [note, setNote] = useState("");
   const [logo, setLogo] = useState<PreparedLogo | null>(null);
   const [stage, setStage] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    // Kept in module scope: dev Strict Mode runs this effect twice, and the hash is gone the second time.
-    const t = captured ?? new URLSearchParams(location.hash.slice(1)).get("t");
-    captured = t;
-    // Drop the token from the address bar and history.
-    history.replaceState(null, "", location.pathname);
-    if (!t) {
-      setMsg("Falta el link mágico. Pedilo desde la página de tu bandera.");
-      return;
-    }
-    setToken(t);
-    fetch("/api/startups/edit", { headers: { "x-edit-token": t } })
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.message);
-        setCur(body);
-        setName(body.name);
-        setCategory(body.category ?? "");
-        setBg(body.bgColor);
-      })
-      .catch((e: Error) => setMsg(e.message || "El link venció o ya se usó."));
-  }, []);
 
   async function pick(f: File | undefined) {
     if (!f) return;
@@ -62,15 +36,15 @@ export default function EditForm({ slug }: { slug: string }) {
     }
   }
 
-  async function save(e: React.FormEvent) {
+  async function send(e: React.FormEvent) {
     e.preventDefault();
-    if (!token) return;
     setBusy(true);
     const form = new FormData();
-    form.set("token", token);
+    form.set("slug", cur.slug);
     form.set("name", name);
     form.set("category", category);
     form.set("bg", bg);
+    form.set("note", note);
     if (logo) form.set("logo", logo.png, "logo.png");
     const res = await fetch("/api/startups/edit", { method: "POST", body: form }).catch(() => null);
     const body = (await res?.json().catch(() => ({}))) as { message?: string } | undefined;
@@ -81,17 +55,18 @@ export default function EditForm({ slug }: { slug: string }) {
 
   return (
     <main className="page-narrow">
-      <h1>Editar bandera</h1>
+      <h1>Pedir un cambio</h1>
+      <p className="muted">Dejá la bandera como la querés. La revisamos y, si está bien, la actualizamos.</p>
       {msg && <p role="status" className={done ? "" : "error"}>{msg}</p>}
-      {done && <a className="btn primary" href={`/${slug}`}>Ver mi bandera</a>}
-      {cur && !done && (
-        <form onSubmit={save} className="panel-form">
+      {done && <a className="btn primary" href={`/${cur.slug}`}>Volver a la bandera</a>}
+      {!done && (
+        <form onSubmit={send} className="panel-form">
           <div className="drop-preview big" style={{ background: bg }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             {(logo || cur.logoUrl) && <img src={logo ? logo.logo.toDataURL() : cur.logoUrl!} alt="Logo" />}
           </div>
           <label className="field">
-            <span>Logo nuevo (opcional; vuelve a revisión)</span>
+            <span>Logo nuevo (opcional)</span>
             <input type="file" accept={ACCEPT} onChange={(e) => pick(e.target.files?.[0])} />
           </label>
           {stage && <p className="muted small">{stage}</p>}
@@ -110,7 +85,11 @@ export default function EditForm({ slug }: { slug: string }) {
             <span>Color de la bandera</span>
             <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
           </label>
-          <button className="btn primary wide" disabled={busy || !!stage}>Guardar</button>
+          <label className="field">
+            <span>¿Algo más que tengamos que saber? (opcional)</span>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
+          </label>
+          <button className="btn primary wide" disabled={busy || !!stage}>Enviar pedido</button>
         </form>
       )}
     </main>
