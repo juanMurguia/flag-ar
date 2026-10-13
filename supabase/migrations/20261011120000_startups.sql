@@ -25,7 +25,7 @@ create table public.startups (
   created_at timestamptz not null default now(),
   approved_at timestamptz,
   updated_at timestamptz,
-  -- Bumped on every edit. A magic link carries the version it was issued for, so it works once.
+  -- Bumped each time an admin applies a change request; names the versioned logo file.
   edit_version integer not null default 0,
   ip_hash text not null,
   file_hash text check (file_hash ~ '^[0-9a-f]{64}$'),
