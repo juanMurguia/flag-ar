@@ -6,7 +6,18 @@
 //   G: puffs, 8 cells                 (big cumulus domes: inverted Worley, spherical caps)
 //   B: puffs, 16 cells, other seed    (smaller domes)
 //   A: value noise, 4 cells           (regional variation)
+//
+// Half-float, not 8-bit: the cloud sea reads these as heights. Phone GPUs (Apple's among them) return a
+// filtered 8-bit texel rounded to 8 bits, so a smooth slope comes back in 1/255 steps, and at a grazing
+// angle those steps draw contour lines across the clouds. Half float has 8x finer steps.
 import * as THREE from "three";
+
+/** Float values to half-float bits, for HalfFloatType textures. */
+function toHalf(src: Float32Array): Uint16Array {
+  const out = new Uint16Array(src.length);
+  for (let i = 0; i < src.length; i++) out[i] = THREE.DataUtils.toHalfFloat(src[i]);
+  return out;
+}
 
 const S = 256;
 
@@ -66,7 +77,10 @@ function puffs(cells: number, seed: number, out: Float32Array) {
 
 let cached: THREE.DataTexture | null = null;
 
-/** Shared 256² RGBA noise texture. Repeat wrapping, mipmapped. */
+/**
+ * Shared 256² RGBA noise texture. Repeat wrapping, mipmapped. The mip levels are built here on the CPU:
+ * WebGL cannot generate them for a half-float texture on phones without a color-buffer extension.
+ */
 export function noiseTexture(): THREE.DataTexture {
   if (cached) return cached;
   const r = new Float32Array(S * S), g = new Float32Array(S * S), b = new Float32Array(S * S), a = new Float32Array(S * S);
@@ -74,18 +88,36 @@ export function noiseTexture(): THREE.DataTexture {
   puffs(8, 23, g);
   puffs(16, 41, b);
   valueNoise(4, 57, a);
-  const data = new Uint8Array(S * S * 4);
+  let level = new Float32Array(S * S * 4);
   for (let i = 0; i < S * S; i++) {
-    data[i * 4] = Math.round(r[i] * 255);
-    data[i * 4 + 1] = Math.round(g[i] * 255);
-    data[i * 4 + 2] = Math.round(b[i] * 255);
-    data[i * 4 + 3] = Math.round(a[i] * 255);
+    level[i * 4] = r[i];
+    level[i * 4 + 1] = g[i];
+    level[i * 4 + 2] = b[i];
+    level[i * 4 + 3] = a[i];
   }
-  const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  // Mip chain: each level the 2x2 average of the one above, down to 1x1. The noise tiles, so the
+  // average wraps around the edges.
+  const mipmaps: { data: Uint16Array; width: number; height: number }[] = [];
+  for (let size = S; size >= 1; size >>= 1) {
+    mipmaps.push({ data: toHalf(level), width: size, height: size });
+    if (size === 1) break;
+    const half = size >> 1, next = new Float32Array(half * half * 4);
+    for (let y = 0; y < half; y++) {
+      for (let x = 0; x < half; x++) {
+        for (let c = 0; c < 4; c++) {
+          const at = (xx: number, yy: number) => level[((yy % size) * size + (xx % size)) * 4 + c];
+          next[(y * half + x) * 4 + c] = (at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1)) / 4;
+        }
+      }
+    }
+    level = next;
+  }
+  const tex = new THREE.DataTexture(mipmaps[0].data, S, S, THREE.RGBAFormat, THREE.HalfFloatType);
+  tex.mipmaps = mipmaps as unknown as ImageData[];
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.generateMipmaps = true;
+  tex.generateMipmaps = false;
   tex.needsUpdate = true;
   cached = tex;
   return tex;
@@ -113,12 +145,12 @@ let cachedBillow: THREE.Data3DTexture | null = null;
  *   R: inverted Worley (round billows, the "cauliflower" look of cumulus), 4 cells per tile
  *   G: inverted Worley, 8 cells per tile
  *   B: value noise, 8 cells per tile (soft breakup)
- * 128 KB, built once (about 30 ms).
+ * 256 KB (half float), built once (about 30 ms).
  */
 export function billowTexture3D(): THREE.Data3DTexture {
   if (cachedBillow) return cachedBillow;
   const N = 32;
-  const data = new Uint8Array(N * N * N * 4);
+  const data = new Float32Array(N * N * N * 4);
   const worley = (cells: number, seed: number) => {
     const pts = new Float32Array(cells * cells * cells * 3);
     for (let i = 0; i < cells * cells * cells; i++) {
@@ -146,8 +178,8 @@ export function billowTexture3D(): THREE.Data3DTexture {
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const k = ((z * N + y) * N + x) * 4;
-        data[k] = Math.round(w4(x, y, z) * 255);
-        data[k + 1] = Math.round(w8(x, y, z) * 255);
+        data[k] = w4(x, y, z);
+        data[k + 1] = w8(x, y, z);
         const fx = (x / N) * vc, fy = (y / N) * vc, fz = (z / N) * vc;
         const xi = Math.floor(fx), yi = Math.floor(fy), zi = Math.floor(fz);
         const u = fx - xi, v = fy - yi, w = fz - zi;
@@ -158,14 +190,15 @@ export function billowTexture3D(): THREE.Data3DTexture {
           const wgt = (ox ? s(u) : 1 - s(u)) * (oy ? s(v) : 1 - s(v)) * (oz ? s(w) : 1 - s(w));
           val += wgt * lattice(xi + ox, yi + oy, zi + oz);
         }
-        data[k + 2] = Math.round(val * 255);
-        data[k + 3] = 255;
+        data[k + 2] = val;
+        data[k + 3] = 1;
       }
     }
   }
-  const tex = new THREE.Data3DTexture(data, N, N, N);
+  // Half float for the same reason as the 2D noise: 8-bit filtering bands the billow edges on phones.
+  const tex = new THREE.Data3DTexture(toHalf(data), N, N, N);
   tex.format = THREE.RGBAFormat;
-  tex.type = THREE.UnsignedByteType;
+  tex.type = THREE.HalfFloatType;
   tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;

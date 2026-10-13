@@ -31,11 +31,11 @@ const POLE_DEPTH = CLOUD_TOP - CLOUD_BOTTOM + 3; // below them, out of sight
 // flag, like a flag on a summit. The cloth is about twice the size of the others.
 const ARG_POLE_H = POLE_H * 2.7;
 const ARG_W = FLAG_W * 2.2, ARG_H = FLAG_H * 2.2;
-const CORRIDOR = 6; // half-width of the empty corridor down the middle
-const DX = 5, DZ = 5.5;
+const CORRIDOR = 7.5; // half-width of the empty corridor down the middle
+// Wide gaps between poles: each flag reads on its own, with sky around it, and the eye can rest on it.
+const DX = 8.5, DZ = 10;
 const FIRST_Z = -2;
-const ARG_ROWS_IN = 3.5; // the Argentine flag stands this many rows down the corridor
-const ARG_Z = FIRST_Z - ARG_ROWS_IN * DZ;
+const ARG_Z = FIRST_Z - 19.25; // the Argentine flag stands this far down the corridor, whatever the row spacing
 const ARG_X = -ARG_W / 2; // pole left of the axis by half the cloth: the cloth centers on the corridor
 const ARG_CENTER = new THREE.Vector3(ARG_X + ARG_W / 2, ARG_POLE_H - 0.25 - ARG_H / 2, ARG_Z);
 
@@ -124,10 +124,13 @@ interface Slot {
   side: 1 | -1;
 }
 
-/** Grid size for n startups: at least 10 columns per side and 60 rows, growing with n. */
+/**
+ * Grid size for n startups: at least 3 columns per side and 8 rows (48 poles), growing with n. Few poles,
+ * far apart: a short gallery of flags you can look at one by one, not a field to the horizon.
+ */
 export function gridSize(n: number) {
-  const cols = Math.max(10, Math.ceil(Math.sqrt(n / 6)));
-  const rows = Math.max(60, Math.ceil(n / (2 * cols)) + 8);
+  const cols = Math.max(3, Math.ceil(Math.sqrt(n / 4)));
+  const rows = Math.max(8, Math.ceil(n / (2 * cols)) + 2);
   return { cols, rows };
 }
 

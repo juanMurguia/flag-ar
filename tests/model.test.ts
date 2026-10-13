@@ -86,7 +86,7 @@ describe("salon layout", () => {
     for (const n of [0, 10, 900, 5000]) {
       const { cols, rows } = gridSize(n);
       expect(cols * 2 * rows).toBeGreaterThanOrEqual(n);
-      expect(cols).toBeGreaterThanOrEqual(10);
+      expect(cols).toBeGreaterThanOrEqual(3);
     }
   });
   it("gives neighbors different wave phases", () => {
