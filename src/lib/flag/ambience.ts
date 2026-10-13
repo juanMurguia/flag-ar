@@ -1,9 +1,10 @@
-// Sound for the Hall of Fame, made in the browser with Web Audio: no audio files to download or license.
+// Sound for the Hall of Fame, made in the browser with Web Audio, plus an optional licensed music file.
 //
 // - Wind: brown noise through a band-pass, swelled by two slow, out-of-step LFOs, so the gusts never repeat.
 // - Flutter: brighter noise, chopped at about 7 Hz, the snap of cloth near the camera. Kept quiet.
 // - Drone: a low D minor chord (D, A, D, F) of detuned sine pairs under a slow-breathing low-pass.
-// Everything goes through a synthetic hall reverb, then one master gain that fades in and out.
+// - Music (optional): public/audio/music.mp3, looped low, when the file exists.
+// Everything goes through one master gain that fades in and out; the synthesized parts also feed a hall reverb.
 //
 // Browsers block audio until the visitor interacts with the page, so `start()` must run inside a
 // pointer or key event handler.
@@ -11,6 +12,8 @@
 const FADE_IN = 4; // s
 const FADE_OUT = 0.6; // s
 const LEVEL = 0.275; // master gain, half of the first mix: wind and drone sit under the page, not over it
+const MUSIC_URL = "/audio/music.mp3";
+const MUSIC_LEVEL = 0.35; // under the master: a bed beneath the wind, not a soundtrack on top
 
 function noiseBuffer(ctx: AudioContext, seconds: number, brown: boolean) {
   const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
@@ -79,6 +82,28 @@ export class Ambience {
     this.master = null;
   }
 
+  /**
+   * Optional music bed: public/audio/music.mp3, looped low under the wind and the drone. The track is not
+   * in the repo (it needs a license); without the file this does nothing and the synthesized mix plays alone.
+   */
+  private async loadMusic(ctx: AudioContext, master: GainNode) {
+    try {
+      const res = await fetch(MUSIC_URL);
+      if (!res.ok) return;
+      const buffer = await ctx.decodeAudioData(await res.arrayBuffer());
+      if (this.ctx !== ctx) return; // disposed while loading
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = MUSIC_LEVEL;
+      src.connect(gain).connect(master);
+      src.start();
+    } catch {
+      // No file, or a format the browser cannot decode: the synthesized mix plays alone.
+    }
+  }
+
   private build() {
     const ctx = new AudioContext();
     this.ctx = ctx;
@@ -93,6 +118,7 @@ export class Ambience {
     const wet = ctx.createGain();
     wet.gain.value = 0.5;
     reverb.connect(wet).connect(master);
+    this.loadMusic(ctx, master);
 
     // Wind.
     const wind = ctx.createBufferSource();
