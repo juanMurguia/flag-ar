@@ -163,7 +163,7 @@ vec3 flagDisplace(vec3 p, float phase) {
 // Fold shading (pair page): the inside of a fold gets less sky and less sun, and sun behind the
 // cloth shows through it. The hem is a double layer, so less light passes there.
 const FOLD_VERTEX = /* glsl */ `
-#ifdef FLAG_FOLD_AO
+#if defined(FLAG_FOLD_AO) || defined(FLAG_CREASE)
   vec3 fmx = flagDisplace(position - vec3(0.02 * uSize.x, 0.0, 0.0), fPhase);
   float fdx = 0.02 * uSize.x;
   // Curvature across the folds, scaled by the flag height so it does not depend on flag size.
@@ -191,6 +191,16 @@ const FOLD_FRAGMENT = /* glsl */ `
   vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
   float through = pow(max(dot(-normal, sunV), 0.0), 3.0);
   totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uTranslucency * through * (1.0 - 0.65 * hem) * ao;
+}
+`;
+
+// Crease shading (Hall of Fame): the same curvature, applied to the albedo so it also works on the cheap
+// Lambert far flags. Valleys darken, crests lift a little. Without it a wave reads as a smooth rubber sheet.
+const CREASE_FRAGMENT = /* glsl */ `
+#include <alphamap_fragment>
+{
+  float cCurv = vFlagCurv * (gl_FrontFacing ? 1.0 : -1.0);
+  diffuseColor.rgb *= 1.0 - 0.38 * smoothstep(0.0, 3.0, cCurv) + 0.08 * smoothstep(0.0, 3.0, -cCurv);
 }
 `;
 
@@ -258,9 +268,10 @@ export function applyWave<M extends THREE.Material>(
 ): M {
   const hasNormal = !(material instanceof THREE.MeshDepthMaterial) && !(material instanceof THREE.MeshDistanceMaterial);
   const withFold = hasNormal && !!fold;
+  const withCrease = hasNormal && !fold && gusts;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms, withFold ? fold : {});
-    const defs = `${instanced ? "#define FLAG_INSTANCED\n" : ""}${hasNormal ? "#define FLAG_HAS_NORMAL\n" : ""}${gusts ? "#define FLAG_GUSTS\n" : ""}${withFold ? "#define FLAG_FOLD_AO\nvarying float vFlagCurv;\n" : ""}`;
+    const defs = `${instanced ? "#define FLAG_INSTANCED\n" : ""}${hasNormal ? "#define FLAG_HAS_NORMAL\n" : ""}${gusts ? "#define FLAG_GUSTS\n" : ""}${withFold ? "#define FLAG_FOLD_AO\nvarying float vFlagCurv;\n" : ""}${withCrease ? "#define FLAG_CREASE\nvarying float vFlagCurv;\n" : ""}`;
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>\n${defs}${WAVE_GLSL}`)
       .replace("#include <beginnormal_vertex>", hasNormal ? NORMAL : "#include <beginnormal_vertex>")
@@ -273,9 +284,14 @@ export function applyWave<M extends THREE.Material>(
         )
         .replace("#include <lights_fragment_end>", FOLD_FRAGMENT);
     }
+    if (withCrease) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying float vFlagCurv;")
+        .replace("#include <alphamap_fragment>", CREASE_FRAGMENT);
+    }
   };
   // One compiled program per variant, not per material.
-  material.customProgramCacheKey = () => `flag-wave-${instanced ? "i" : "s"}${gusts ? "g" : ""}${withFold ? "f" : ""}`;
+  material.customProgramCacheKey = () => `flag-wave-${instanced ? "i" : "s"}${gusts ? "g" : ""}${withFold ? "f" : ""}${withCrease ? "c" : ""}`;
   return material;
 }
 

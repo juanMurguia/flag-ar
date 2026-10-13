@@ -4,21 +4,32 @@
 // diffuse * sunColor * strength * max(0, dot(viewDir, -sunDir))^k, where viewDir points from the
 // surface to the eye. It is strongest when the flag covers the sun, as in a real sunset photo.
 import * as THREE from "three";
+import { SUN_GLOW_GLSL } from "./sunsetSky";
 import { createCanvas } from "./texture";
 
 let weave: THREE.CanvasTexture | null = null;
 
-/** Tileable plain-weave normal map, 128², drawn once. */
-export function weaveNormalMap(): THREE.CanvasTexture {
+/** Tile repeats per flag for `clothNormalMap`: one tile is about half the flag. */
+export const CLOTH_NORMAL_REPEAT: [number, number] = [2, 1.3];
+
+/**
+ * Tileable cloth normal map, 512², drawn once: plain weave, 128 threads per tile. Seen up close only;
+ * mipmaps fade it out far away. No painted creases: they are fixed to the cloth and do not move with
+ * the wind, so they read as stains. The folds come from the geometry (cloth sim, or the wave's curvature).
+ */
+export function clothNormalMap(): THREE.CanvasTexture {
   if (weave) return weave;
-  const S = 128, threads = 16;
+  const S = 512, threads = 128;
+  // Lookup table: a thread depends only on its own coordinate.
+  const pitch = S / threads;
+  const bump = Float32Array.from({ length: S }, (_, k) => Math.sin((((k % pitch) + 0.5) / pitch) * Math.PI));
   const height = new Float32Array(S * S);
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
-      const u = (x / S) * threads, v = (y / S) * threads;
-      const over = (Math.floor(u) + Math.floor(v)) % 2 === 0;
-      const warp = Math.sin((u % 1) * Math.PI), weft = Math.sin((v % 1) * Math.PI);
-      height[y * S + x] = over ? warp * 0.7 + weft * 0.3 : weft * 0.7 + warp * 0.3;
+      const over = (((x / pitch) | 0) + ((y / pitch) | 0)) % 2 === 0;
+      const warp = bump[x], weft = bump[y];
+      const thread = over ? warp * 0.7 + weft * 0.3 : weft * 0.7 + warp * 0.3;
+      height[y * S + x] = thread * 0.6;
     }
   }
   const c = createCanvas(S, S);
@@ -27,7 +38,7 @@ export function weaveNormalMap(): THREE.CanvasTexture {
   const h = (x: number, y: number) => height[((y + S) % S) * S + ((x + S) % S)];
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
-      const dx = (h(x - 1, y) - h(x + 1, y)) * 1.5, dy = (h(x, y - 1) - h(x, y + 1)) * 1.5;
+      const dx = (h(x - 1, y) - h(x + 1, y)) * 0.5, dy = (h(x, y - 1) - h(x, y + 1)) * 0.5;
       const len = Math.hypot(dx, dy, 1);
       const k = (y * S + x) * 4;
       img.data[k] = ((dx / len) * 0.5 + 0.5) * 255;
@@ -73,6 +84,8 @@ export function applyBacklight<M extends THREE.Material>(material: M, uniforms: 
 ${shader.fragmentShader.includes("uniform vec3 uSunDir;") ? "" : "uniform vec3 uSunDir;\nuniform vec3 uSunColor;"}
 uniform float uBacklight;
 uniform float uGlow;
+const float CLOTH_TRANSMIT = 0.35; // share of the sun a thin flag fabric lets through
+${SUN_GLOW_GLSL}
 ${instanced ? "varying float vGlow;" : ""}`,
       )
       .replace(
@@ -85,11 +98,15 @@ ${instanced ? "varying float vGlow;" : ""}`,
   // How much light comes through this part of the cloth: most where the fold faces away from the sun (the
   // light enters its back), little in the folds turned toward it. Without it the glow is flat, like card.
   float thru = 0.25 + 0.75 * pow(max(dot(-normal, sunV), 0.0), 2.0);
-  totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uBacklight * thru * (pow(back, 3.0) * 0.6 + pow(back, 12.0) * 1.4);
-  // The sun right behind the cloth: a hot spot that shines through it in the cloth's own colors, deeper
-  // than the surface (light crosses the dye), and spreads a little around the disc.
+  // Broad: the bright sky around a low sun lights the cloth from behind too, not only the disc. A narrow
+  // lobe made two flags a few degrees apart read as different fabrics (one glowing, one flat).
+  totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uBacklight * thru * (pow(back, 3.0) * 0.6 + pow(back, 6.0) * 1.4);
+  // The sun right behind the cloth shines through it in the cloth's own colors, deeper than the surface
+  // (light crosses the dye). Thin cloth passes only part of the light behind it, so the spot is the sun as
+  // the sky draws it, times CLOTH_TRANSMIT: it never outshines the bare sun beside the flag. (A fixed hot
+  // spot did, about 5x, and the sun looked stronger through the cloth than in the open sky.)
   vec3 dyed = diffuseColor.rgb * sqrt(diffuseColor.rgb);
-  totalEmissiveRadiance += dyed * uSunColor * uBacklight * thru * (pow(back, 1200.0) * 3.0 + pow(back, 150.0) * 1.8);
+  totalEmissiveRadiance += dyed * uSunColor * CLOTH_TRANSMIT * thru * sunGlow(back);
   // Gold rim: edges and fold crests seen at a grazing angle catch the light behind them, in the sun's color.
   float edgeRim = pow(1.0 - abs(dot(normal, viewDirV)), 3.0);
   totalEmissiveRadiance += uSunColor * uBacklight * 0.5 * edgeRim * pow(back, 4.0);

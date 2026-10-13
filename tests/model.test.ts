@@ -3,7 +3,7 @@ import {
   cleanCategory, cleanName, contrast, defaultBackground, dominantColor, isValidSlug,
   normalizeStartupLink, slugify,
 } from "@/lib/startups/model";
-import { gridSize, gridSlots, phaseOf } from "@/lib/flag/salon";
+import { hallSlots, phaseOf } from "@/lib/flag/salon";
 
 describe("slugify", () => {
   it("drops accents and symbols", () => {
@@ -65,29 +65,20 @@ describe("default flag color", () => {
 
 describe("salon layout", () => {
   it("alternates sides and never puts two flags on one spot", () => {
-    const slots = gridSlots(10, 40);
-    expect(slots).toHaveLength(800);
-    const seen = new Set<string>();
-    for (const p of slots) {
-      const key = `${p.x},${p.z}`;
-      expect(seen.has(key)).toBe(false);
-      seen.add(key);
-    }
+    const slots = hallSlots(12);
+    expect(slots).toHaveLength(12);
+    expect(new Set(slots.map((p) => `${p.x},${p.z}`)).size).toBe(12);
     expect(slots[0].side).toBe(-1);
     expect(slots[1].side).toBe(1);
   });
-  it("seats the first startups near the corridor and the front", () => {
-    const slots = gridSlots(10, 40);
-    const inner = Math.min(...slots.map((p) => Math.abs(p.x)));
-    expect(Math.abs(slots[0].x)).toBe(inner);
-    expect(Math.abs(slots[0].z)).toBeLessThanOrEqual(Math.abs(slots[799].z));
-  });
-  it("grows the grid so every startup has a slot", () => {
-    for (const n of [0, 10, 900, 5000]) {
-      const { cols, rows } = gridSize(n);
-      expect(cols * 2 * rows).toBeGreaterThanOrEqual(n);
-      expect(cols).toBeGreaterThanOrEqual(3);
-    }
+  it("puts the first four in one front row, even around the axis", () => {
+    const row = hallSlots(4);
+    expect(new Set(row.map((p) => p.z)).size).toBe(1);
+    const centers = row.map((p) => p.x + 3.1 / 2); // cloths fly to the right of the pole
+    expect(centers[0]).toBeCloseTo(-centers[1]);
+    expect(centers[2]).toBeCloseTo(-centers[3]);
+    expect(Math.abs(centers[0])).toBeLessThan(Math.abs(centers[2]));
+    expect(hallSlots(5)[4].z).toBeLessThan(row[0].z);
   });
   it("gives neighbors different wave phases", () => {
     expect(Math.abs(phaseOf(1) - phaseOf(0))).toBeGreaterThan(0.5);

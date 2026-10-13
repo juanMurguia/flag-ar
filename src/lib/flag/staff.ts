@@ -80,8 +80,9 @@ export class FlagStaff {
     this.uniforms = waveUniforms(width, height, opts.phase ?? 0);
     // Polyester flag cloth: matte, a soft sheen at grazing angles, almost no specular highlight.
     this.material = applyWave(new THREE.MeshPhysicalMaterial({
-      map: this.texture, side: THREE.DoubleSide, roughness: 0.82, metalness: 0, specularIntensity: 0.22,
-      sheen: 0.55, sheenColor: new THREE.Color(0xfff1e6), sheenRoughness: 0.7,
+      // Sheen tinted by the print (sheenColorMap): a white sheen read as milky glare on dark and blue cloth.
+      map: this.texture, side: THREE.DoubleSide, roughness: 0.9, metalness: 0, specularIntensity: 0.06, envMapIntensity: 0.5,
+      sheen: 0.35, sheenColor: new THREE.Color(0xffffff), sheenColorMap: this.texture, sheenRoughness: 0.85,
     }), this.uniforms, false, false, opts.fold ?? null);
 
     // The halyard runs just off the pole, on the flag side. The hoist edge hangs from snap hooks on it.

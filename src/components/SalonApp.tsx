@@ -19,7 +19,6 @@ const FX_KEY = "flagar-hq";
 const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: true, hd: true };
 const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
 const SOUND_KEY = "flagar-sound";
-const UI_IDLE_MS = 4000;
 const HINT_KEY = "flagar-hint-seen";
 
 function savedHigh(): boolean | null {
@@ -105,6 +104,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   }, []);
   // First visit: one line on how the hall works, gone at the first click, tap, wheel, or key.
   const [hint, setHint] = useState(false);
+  const [ready, setReady] = useState(false); // the 3D scene shows its first frames
   useEffect(() => {
     let seen = true;
     try {
@@ -235,9 +235,11 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     return () => clearInterval(t);
   }, []);
 
+  const countLabel = `${all.length.toLocaleString("es-AR")} ${all.length === 1 ? "startup" : "startups"}`;
   const q = normalize(query.trim());
   const matches = useMemo(
-    () => (q ? all.filter((s) => normalize(s.name).includes(q) || s.domain.includes(q) || normalize(categoryLabel(s.category) ?? "").includes(q)) : all),
+    // By name or by category (its label, or its key: "ai", "saas"). The domain counts as part of the name.
+    () => (q ? all.filter((s) => normalize(s.name).includes(q) || s.domain.includes(q) || s.category === q || normalize(categoryLabel(s.category) ?? "").includes(q)) : all),
     [all, q],
   );
 
@@ -254,6 +256,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         onPlaceholder: (slot) => openRef.current(slot),
         onFx: () => setHigh(false), // auto drop on a slow GPU: shown, not saved
         onHover: (t) => setHovered(t),
+        onReady: () => setReady(true),
       }, startHigh ? FX_HIGH : FX_LOW);
       setHigh(startHigh);
       s.setStartups(listRef.current);
@@ -263,6 +266,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       cancelled = true;
       s?.dispose();
       scene.current = null;
+      setReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
@@ -366,8 +370,9 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
 
   async function wallpaper() {
     const s = scene.current;
-    if (!s) return;
-    saveBlob(await s.snapshot(3840, 2160), `flagar-salon${picked ? `-${picked.slug}` : ""}.jpg`);
+    const i = shown ? listRef.current.findIndex((x) => x.id === shown.id) : -1;
+    if (!s || !shown || i < 0) return;
+    saveBlob(await s.wallpaper(i, 3840, 2160), `wallpaper-4k-${shown.slug}.jpg`);
   }
 
   const tweet = xIntent(
@@ -375,64 +380,30 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     "https://flag.ar",
   );
 
-  // Calm UI: in the 3D walk, the bar and the corner fade out after a few seconds without input, so the
-  // view reads as a film still. Any pointer move, touch, wheel, or key brings them back. They stay while
-  // the visitor is busy with them: a query typed, a card or the hoist sheet open, or focus inside.
-  const [uiIdle, setUiIdle] = useState(false);
-  const busy = view !== "3d" || !!query || !!picked || hoist !== "closed";
-  useEffect(() => {
-    if (busy) {
-      setUiIdle(false);
-      return;
-    }
-    let t = 0;
-    const wake = () => {
-      setUiIdle(false);
-      clearTimeout(t);
-      t = window.setTimeout(() => {
-        if (!document.activeElement?.closest(".salon-bar, .salon-corner")) setUiIdle(true);
-      }, UI_IDLE_MS);
-    };
-    const events = ["pointermove", "pointerdown", "wheel", "keydown"] as const;
-    for (const e of events) window.addEventListener(e, wake, { passive: true });
-    wake();
-    return () => {
-      clearTimeout(t);
-      for (const e of events) window.removeEventListener(e, wake);
-    };
-  }, [busy]);
-
   return (
-    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}${uiIdle ? " ui-idle" : ""}`}>
+    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}`}>
       {view === "3d" && <div ref={holder} className="salon-holder" />}
+      {/* Shown while the scene code loads and the first frames compile shaders. Fades out with the canvas fade-in. */}
+      {view === "3d" && (
+        <div className="salon-loader" data-state={ready ? "done" : "loading"} role="status" aria-hidden={ready}>
+          <svg className="salon-loader-flag" viewBox="0 0 48 40" aria-hidden="true">
+            <line x1="6" y1="2" x2="6" y2="38" />
+            <path d="M6 5 C14 1 20 9 28 5 S40 3 44 5 V21 C40 19 34 23 28 21 S14 17 6 21 Z" />
+          </svg>
+          <span className="sr-only">Cargando</span>
+        </div>
+      )}
 
-      {/* One row: count, search, hoist. Every control is 28 px on a 4 px rhythm. */}
+      {/* Just the search. The count lives in its placeholder; adding a startup lives in the bottom pill. */}
       <header className="salon-bar">
-        <h1 className="salon-count" aria-live="polite">
-          <strong>{all.length.toLocaleString("es-AR")}</strong> startups
-        </h1>
+        <h1 className="sr-only" aria-live="polite">Salón de la Fama: {countLabel}</h1>
         <label className="search">
           <Icon name="search" size={13} />
           <input
-            type="search" placeholder="Buscar" value={query} onChange={(e) => setQuery(e.target.value)}
-            aria-label="Buscar startup"
+            type="search" placeholder={`Buscá entre ${countLabel} por nombre o categoría`} value={query}
+            onChange={(e) => setQuery(e.target.value)} aria-label="Buscar startup por nombre o categoría"
           />
         </label>
-
-        {/* Empty hall: the hoist button grows into the invitation, so the row stays one line. */}
-        {all.length === 0 && !q ? (
-          <Link href="/izar" className="bar-cta" onClick={onHoistLink} aria-expanded={hoist === "open"}>
-            <Icon name="plus" size={13} />
-            <span>Izá la primera</span>
-          </Link>
-        ) : (
-          <Link
-            href="/izar" className="bar-btn" aria-label="Izá tu bandera" title="Izá tu bandera" onClick={onHoistLink}
-            aria-expanded={hoist === "open"}
-          >
-            <Icon name="plus" size={14} />
-          </Link>
-        )}
       </header>
 
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
@@ -493,7 +464,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
             )}
             <div className="salon-card-actions">
               <Link className="text-link" href={`/${shown.slug}`}>Ver bandera</Link>
-              <button type="button" className="text-link" onClick={wallpaper}>Fondo 4K</button>
+              <button type="button" className="text-link" onClick={wallpaper}>Fondo 4K <Icon name="download" size={12} /></button>
             </div>
           </div>
         </aside>
@@ -504,11 +475,25 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           ref={tipRef} className="salon-tip" aria-hidden="true"
           style={{ transform: `translate(${mouse.current.x + 14}px, ${mouse.current.y + 18}px)` }}
         >
-          {hovered.kind === "placeholder" ? "Izá tu bandera acá" : (() => {
+          {/* The outer div follows the mouse; the inner badge re-mounts per flag, so each new one pops in. */}
+          {hovered.kind === "placeholder" ? (
+            <div key="placeholder" className="tip-badge">
+              <span className="tip-swatch tip-swatch-empty"><Icon name="plus" size={11} /></span>
+              <span className="tip-name">Izá tu bandera acá</span>
+            </div>
+          ) : (() => {
             const s = all[hovered.index];
             if (!s) return null;
             const cat = categoryLabel(s.category);
-            return <>{s.name}{cat && <span> · {cat}</span>}</>;
+            return (
+              <div key={s.id} className="tip-badge">
+                <span className="tip-swatch" style={{ background: s.bgColor }}>
+                  {s.logoUrl && <img src={s.logoUrl} alt="" />}
+                </span>
+                <span className="tip-name">{s.name}</span>
+                {cat && <span className="tip-chip">{cat}</span>}
+              </div>
+            );
           })()}
         </div>
       )}
@@ -518,15 +503,27 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       )}
 
       {/* No flag picked: the tour starts here. With a card open, its own arrows take over. */}
-      {view === "3d" && !shown && all.length > 0 && hoist === "closed" && (
+      {view === "3d" && !shown && hoist === "closed" && (
         <nav className="salon-nav" aria-label="Recorrer las banderas">
-          <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
-            <Icon name="prev" size={14} />
-          </button>
-          <button type="button" className="salon-nav-label" onClick={() => step(1)}>Recorrer las banderas</button>
-          <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
-            <Icon name="next" size={14} />
-          </button>
+          {all.length > 0 && (
+            <>
+              <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
+                <Icon name="prev" size={14} />
+              </button>
+              <button type="button" className="salon-nav-label" onClick={() => step(1)}>Recorrer las banderas</button>
+              <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
+                <Icon name="next" size={14} />
+              </button>
+            </>
+          )}
+          {/* The hall holds only a few empty poles now: this is the main way in. Same sheet as the bar's +. */}
+          <Link href="/izar" className="nav-cta" onClick={onHoistLink}>
+            <svg className="nav-cta-sun" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="3.2" />
+              <path d="M8 .8v2.4M8 12.8v2.4M.8 8h2.4M12.8 8h2.4M2.9 2.9l1.7 1.7M11.4 11.4l1.7 1.7M2.9 13.1l1.7-1.7M11.4 4.6l1.7-1.7" />
+            </svg>
+            <span>Agregar mi startup</span>
+          </Link>
         </nav>
       )}
 

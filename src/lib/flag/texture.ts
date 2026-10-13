@@ -211,11 +211,11 @@ function mulberry32(seed: number) {
   };
 }
 
-/**
- * Plain weave, 4 px thread pitch. Builds a 512 px tile, then fills full-size canvases.
- * Returns a gray overlay (multiply) and a tangent-space normal map.
- */
-export function buildWeave(width: number, height: number) {
+let weaveTileCache: { overlay: HTMLCanvasElement; normal: HTMLCanvasElement } | null = null;
+
+/** The 512 px weave tiles, built once: a gray overlay (multiply) and a tangent-space normal map. */
+function weaveTiles() {
+  if (weaveTileCache) return weaveTileCache;
   const T = 512;
   const PITCH = 4;
   const rand = mulberry32(1816);
@@ -267,13 +267,70 @@ export function buildWeave(width: number, height: number) {
   }
   overlayTile.getContext("2d")!.putImageData(o, 0, 0);
   normalTile.getContext("2d")!.putImageData(nm, 0, 0);
+  weaveTileCache = { overlay: overlayTile, normal: normalTile };
+  return weaveTileCache;
+}
 
-  const fill = (tile: HTMLCanvasElement) => {
-    const c = createCanvas(width, height);
-    const ctx = c.getContext("2d")!;
-    ctx.fillStyle = ctx.createPattern(tile, "repeat")!;
+function fillTile(tile: HTMLCanvasElement, width: number, height: number) {
+  const c = createCanvas(width, height);
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = ctx.createPattern(tile, "repeat")!;
+  ctx.fillRect(0, 0, width, height);
+  return c;
+}
+
+/**
+ * Plain weave, 4 px thread pitch, from a 512 px tile, at full size.
+ * Returns a gray overlay (multiply) and a tangent-space normal map.
+ */
+export function buildWeave(width: number, height: number) {
+  const t = weaveTiles();
+  return { overlay: fillTile(t.overlay, width, height), normal: fillTile(t.normal, width, height) };
+}
+
+const finishes = new Map<string, HTMLCanvasElement>();
+
+/**
+ * Gray multiply overlay that makes a printed canvas read as sewn cloth: the weave, an uneven dye
+ * (large soft blotches, a few percent), and a hem with its stitch line on every edge. One per size, cached.
+ */
+export function clothFinish(width: number, height: number): HTMLCanvasElement {
+  const key = `${width}x${height}`;
+  const cached = finishes.get(key);
+  if (cached) return cached;
+  const c = fillTile(weaveTiles().overlay, width, height);
+  const ctx = c.getContext("2d")!;
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  // Uneven dye: real cloth is never one flat color. Darken only, so white stays near white.
+  const rand = mulberry32(906);
+  for (let i = 0; i < 9; i++) {
+    const x = rand() * width, y = rand() * height, r = (0.25 + rand() * 0.35) * width;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const k = Math.round(255 * (0.972 + rand() * 0.014)); // faint: stronger reads as stains on white
+    g.addColorStop(0, `rgb(${k},${k},${k})`);
+    g.addColorStop(1, "rgb(255,255,255)");
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, width, height);
-    return c;
-  };
-  return { overlay: fill(overlayTile), normal: fill(normalTile) };
+  }
+  // Hem: a folded double layer, a little darker, with a stitch line along its inner edge. The hoist hem is wider.
+  const hem = Math.max(2, Math.round(height * 0.022));
+  const hoist = hem * 2;
+  ctx.fillStyle = "rgb(244,244,244)";
+  ctx.fillRect(0, 0, hoist, height);
+  ctx.fillRect(width - hem, 0, hem, height);
+  ctx.fillRect(hoist, 0, width - hoist - hem, hem);
+  ctx.fillRect(hoist, height - hem, width - hoist - hem, hem);
+  ctx.strokeStyle = "rgb(224,224,224)"; // faint: a stitch seen from a few meters, not a drawn line
+  ctx.lineWidth = Math.max(1, height * 0.0025);
+  ctx.setLineDash([height * 0.008, height * 0.005]);
+  const s = hem * 0.8;
+  ctx.strokeRect(s, s, width - 2 * s, height - 2 * s);
+  ctx.beginPath();
+  ctx.moveTo(hoist * 0.9, s);
+  ctx.lineTo(hoist * 0.9, height - s);
+  ctx.stroke();
+  ctx.restore();
+  finishes.set(key, c);
+  return c;
 }

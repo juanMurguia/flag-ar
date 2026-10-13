@@ -3,7 +3,7 @@
 // - Wind: brown noise through a band-pass, swelled by two slow, out-of-step LFOs, so the gusts never repeat.
 // - Flutter: brighter noise, chopped at about 7 Hz, the snap of cloth near the camera. Kept quiet.
 // - Drone: a low D minor chord (D, A, D, F) of detuned sine pairs under a slow-breathing low-pass.
-// - Music (optional): public/audio/music.mp3, looped low, when the file exists.
+// - Music (optional): public/audio/music.mp3, looped at the level of the wind, when the file exists.
 // Everything goes through one master gain that fades in and out; the synthesized parts also feed a hall reverb.
 //
 // Browsers block audio until the visitor interacts with the page, so `start()` must run inside a
@@ -13,7 +13,9 @@ const FADE_IN = 4; // s
 const FADE_OUT = 0.6; // s
 const LEVEL = 0.275; // master gain, half of the first mix: wind and drone sit under the page, not over it
 const MUSIC_URL = "/audio/music.mp3";
-const MUSIC_LEVEL = 0.35; // under the master: a bed beneath the wind, not a soundtrack on top
+// Level with the wind and the drone, not on top. Measured: at 1.0 the track's RMS matches the synthesized
+// mix (about 0.09). The harmonica sits where the ear hears best, so it stays well under that: 0.35 (-9 dB).
+const MUSIC_LEVEL = 0.35;
 
 function noiseBuffer(ctx: AudioContext, seconds: number, brown: boolean) {
   const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
@@ -83,7 +85,7 @@ export class Ambience {
   }
 
   /**
-   * Optional music bed: public/audio/music.mp3, looped low under the wind and the drone. The track is not
+   * Optional music bed: public/audio/music.mp3, looped at the level of the wind and the drone. The track is not
    * in the repo (it needs a license); without the file this does nothing and the synthesized mix plays alone.
    */
   private async loadMusic(ctx: AudioContext, master: GainNode) {

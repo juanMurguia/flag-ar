@@ -12,6 +12,7 @@
 // Quality: STEPS sets the march budget. The low tier uses fewer steps.
 import * as THREE from "three";
 import { billowTexture3D, NOISE_GLSL, noiseTexture } from "./noise";
+import { SKY_GOLD, SKY_LOW, SUN_GLOW_GLSL } from "./sunsetSky";
 
 export const CLOUD_TOP = 1.2;
 export const CLOUD_BOTTOM = -7;
@@ -19,21 +20,23 @@ export const CLOUD_BOTTOM = -7;
 export interface CloudLook {
   sunDir: THREE.Vector3;
   sunColor: THREE.Color;
-  horizon: THREE.Color;
   fogDensity: number;
 }
 
 const SHADE_GLSL = /* glsl */ `
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
-uniform vec3 uHorizon;
+uniform vec3 uSkyLow;
+uniform vec3 uSkyGold;
 uniform float uFogDensity;
+${SUN_GLOW_GLSL}
 
-// Haze color seen along direction rd: dim away from the sun, horizon gold toward it, brighter near it.
+// Haze color seen along direction rd: the sky's own color at the horizon (sunsetSky.ts, h = 0), so the far
+// sea fades into the sky. A darker haze drew a flat band under the sky with a hard edge at the horizon.
 vec3 hazeColor(vec3 rd) {
   float s = max(dot(rd, uSunDir), 0.0);
-  vec3 c = uHorizon * (0.35 + 0.65 * pow(s, 2.0));
-  c += uSunColor * (pow(s, 6.0) * 0.55 + pow(s, 60.0) * 1.6);
+  vec3 c = mix(uSkyLow, uSkyGold, pow(s, 2.5) * 0.75);
+  c += uSunColor * sunGlow(s);
   return c;
 }
 
@@ -100,7 +103,9 @@ float density(vec3 p, float surf, float detail) {
   if (inside <= 0.0) return 0.0;
   if (inside >= 1.0 || detail < 0.5) return 1.0;
   // Billows rise slowly while they travel: the edges boil instead of holding still.
-  vec3 q = vec3(p.x - drift().x, p.y - uTime * 0.08, p.z - drift().y);
+  // Rise relative to the dome surface, not in world y: a pattern rising through a near-flat dome top shows
+  // as edges racing sideways (speed = rise / slope), against the wind too, and the sea seems to shake.
+  vec3 q = vec3(p.x - drift().x, (p.y - surf) - uTime * 0.08, p.z - drift().y);
   vec4 a = texture(uBillow, q / 22.0);
   vec4 b = texture(uBillow, q / 7.0);
   float billow = a.r * 0.55 + b.g * 0.3 + b.b * 0.15;   // 0..1, high in the middle of each billow
@@ -201,7 +206,8 @@ function shadeUniforms(look: CloudLook) {
   return {
     uSunDir: { value: look.sunDir },
     uSunColor: { value: look.sunColor },
-    uHorizon: { value: look.horizon },
+    uSkyLow: { value: SKY_LOW },
+    uSkyGold: { value: SKY_GOLD },
     uFogDensity: { value: look.fogDensity },
   };
 }

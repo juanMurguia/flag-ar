@@ -11,6 +11,17 @@ const SKY_RADIUS = 18000;
 const DOME_RADIUS = 12000;
 const SUN_DISTANCE = 9000;
 
+// Sky colors at the horizon. The cloud sea uses them for its far haze, so the sea meets the sky with no seam.
+export const SKY_LOW = new THREE.Color(1.0, 0.78, 0.55);
+export const SKY_GOLD = new THREE.Color(1.9, 1.0, 0.42);
+
+/**
+ * The sun as the sky draws it, in units of uSunColor, for s = dot(view, sun). The sky, the cloud haze and
+ * the light through the flags share it, so nothing in front of the sun can shine brighter than the sun.
+ */
+export const SUN_GLOW_GLSL = /* glsl */ `
+float sunGlow(float s) { return pow(s, 8.0) * 0.25 + pow(s, 40.0) * 0.8 + pow(s, 400.0) * 1.2; }`;
+
 /** Unit vector toward the sun, from elevation and azimuth in degrees. Azimuth 0 = straight down -z. */
 export function sunDirection(elevationDeg: number, azimuthDeg: number) {
   const phi = THREE.MathUtils.degToRad(90 - elevationDeg);
@@ -35,6 +46,7 @@ uniform vec3 uZenith;
 uniform vec3 uUpper;
 uniform vec3 uLow;
 uniform vec3 uGold;
+${SUN_GLOW_GLSL}
 varying vec3 vWorld;
 void main() {
   vec3 d = normalize(vWorld - cameraPosition);
@@ -48,7 +60,7 @@ void main() {
   // The sun has no disc: a hot core that falls off smoothly into a halo, then a wide warm glow. A drawn
   // disc reads as a sticker; a burnt-out core with no edge reads as a sun. The core stays moderate: brighter,
   // it clips to a flat circle and bloom spreads that circle into a disc again. The lens glare (post.ts) does the rest.
-  col += uSunColor * (pow(s, 8.0) * 0.25 + pow(s, 40.0) * 0.8 + pow(s, 400.0) * 1.2);
+  col += uSunColor * sunGlow(s);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -61,8 +73,8 @@ function makeSky(sunDir: THREE.Vector3, sunColor: THREE.Color) {
         uSunColor: { value: sunColor },
         uZenith: { value: new THREE.Color(0.06, 0.16, 0.42) },
         uUpper: { value: new THREE.Color(0.22, 0.42, 0.72) },
-        uLow: { value: new THREE.Color(1.0, 0.78, 0.55) },
-        uGold: { value: new THREE.Color(1.9, 1.0, 0.42) },
+        uLow: { value: SKY_LOW },
+        uGold: { value: SKY_GOLD },
       },
       vertexShader: SKY_VERT,
       fragmentShader: SKY_FRAG,

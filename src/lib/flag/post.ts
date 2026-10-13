@@ -1,5 +1,8 @@
 // Post-processing for the Hall of Fame (pmndrs "postprocessing", half-float buffers).
 //
+// Backdrop: the sky and the cloud sea (both ray-marched, both soft) render first into their own target, at a
+//           fraction of the screen resolution. A full-screen triangle then copies color and depth into the
+//           main scene. They were two thirds of the scene cost; poles, flags and birds stay at full resolution.
 // Pass 0, AO:   N8AO screen-space ambient occlusion (optional). It reads the depth of the RenderPass and
 //               rebuilds normals from it, so the waving cloth (vertex displacement) gets correct contact shade.
 // Pass 1, HDR:  exposure -> Bloom (mipmap blur, optional) -> God rays from the sun mesh (optional) -> ACES tone mapping.
@@ -61,6 +64,78 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   }
 }
 
+const BACKDROP_VERT = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = position.xy * 0.5 + 0.5;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+// Color: bilinear, the content is soft. Depth: the nearest texel (depth textures do not filter). The cloud
+// sea writes its own depth, so the poles still sink into it, and the AO and the glare still read it.
+const BACKDROP_FRAG = /* glsl */ `
+uniform sampler2D tColor;
+uniform sampler2D tDepth;
+varying vec2 vUv;
+void main() {
+  gl_FragColor = texture2D(tColor, vUv);
+  gl_FragDepth = texture2D(tDepth, vUv).r;
+}`;
+
+/**
+ * Renders a scene into a smaller target and draws it back into the main scene, color and depth. `mesh` goes
+ * in the main scene; `render` runs before the composer.
+ */
+class Backdrop {
+  readonly target: THREE.WebGLRenderTarget;
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+
+  constructor(private scene: THREE.Scene, private camera: THREE.Camera) {
+    this.target = new THREE.WebGLRenderTarget(1, 1, {
+      type: THREE.HalfFloatType, // HDR: the sun glow runs well over 1
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthTexture: new THREE.DepthTexture(1, 1),
+    });
+    // One triangle over the whole screen: no diagonal seam down the middle.
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+    this.mesh = new THREE.Mesh(
+      geo,
+      new THREE.ShaderMaterial({
+        uniforms: { tColor: { value: this.target.texture }, tDepth: { value: this.target.depthTexture } },
+        vertexShader: BACKDROP_VERT,
+        fragmentShader: BACKDROP_FRAG,
+        // Test on, but always pass: with the depth test off, WebGL writes no depth at all, and the poles
+        // then drew over the clouds all the way down.
+        depthTest: true,
+        depthFunc: THREE.AlwaysDepth,
+        depthWrite: true,
+      }),
+    );
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = -100; // first in the opaque list: everything else depth-tests against it
+  }
+
+  setSize(w: number, h: number) {
+    this.target.setSize(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+  }
+
+  render(renderer: THREE.WebGLRenderer) {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.target);
+    renderer.render(this.scene, this.camera);
+    renderer.setRenderTarget(prev);
+  }
+
+  dispose() {
+    this.target.depthTexture?.dispose();
+    this.target.dispose();
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
+  }
+}
+
 /** The effects a visitor can switch on and off. Each one costs GPU time; all off is the fast path. */
 export interface PostFx {
   ao: boolean;
@@ -75,6 +150,8 @@ export class Post {
   private ldrPass: EffectPass;
   private fx: PostFx;
   private size = { w: 1, h: 1 };
+  private backdrop: Backdrop;
+  private backdropScale: number;
   readonly exposure = new THREE.Uniform(0.38);
   readonly saturation = new HueSaturationEffect({ saturation: 0.28 });
   private glare = new Map<string, THREE.Uniform>([
@@ -91,7 +168,12 @@ export class Post {
     private camera: THREE.PerspectiveCamera,
     private sun: THREE.Mesh,
     fx: PostFx,
+    backdrop: THREE.Scene,
+    backdropScale: number,
   ) {
+    this.backdrop = new Backdrop(backdrop, camera);
+    this.backdropScale = backdropScale;
+    scene.add(this.backdrop.mesh);
     this.composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
     this.composer.addPass(new RenderPass(scene, camera));
     const noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
@@ -158,6 +240,19 @@ export class Post {
   setSize(w: number, h: number) {
     this.size = { w, h };
     this.composer.setSize(w, h, false);
+    this.sizeBackdrop();
+  }
+
+  /** Backdrop resolution as a fraction of the drawing buffer, in each axis. 1 = full resolution. */
+  setBackdropScale(scale: number) {
+    if (scale === this.backdropScale) return;
+    this.backdropScale = scale;
+    this.sizeBackdrop();
+  }
+
+  private sizeBackdrop() {
+    const pr = this.renderer.getPixelRatio() * this.backdropScale;
+    this.backdrop.setSize(this.size.w * pr, this.size.h * pr);
   }
 
   render(dt: number) {
@@ -167,11 +262,13 @@ export class Post {
     this.glare.get("strength")!.value = p.z < 1 ? 1 - THREE.MathUtils.smoothstep(off, 1.1, 2.2) : 0;
     (this.glare.get("sunUv")!.value as THREE.Vector2).set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5);
     this.glare.get("aspect")!.value = this.size.w / this.size.h;
+    this.backdrop.render(this.renderer);
     this.composer.render(dt);
   }
 
   dispose() {
     this.ao?.dispose();
+    this.backdrop.dispose();
     this.composer.dispose();
   }
 }

@@ -1,4 +1,4 @@
-// Hall of Fame: an endless grid of flagpoles rising out of a sea of golden sunset clouds. A central
+// Hall of Fame: a short row of flagpoles rising out of a sea of golden sunset clouds. A central
 // corridor runs toward the sun; the Argentine flag stands in it, a little larger and taller.
 //
 // Cost model, so it holds with thousands of flags:
@@ -10,17 +10,19 @@
 //   Both bend with the same vertex shader, so a flag does not jump when it changes level.
 // - Logos load only for flags in view and close. Nothing else is fetched.
 // - Empty slots hold muted "tu startup acá" flags, so the hall never looks empty.
+// - Home stays light: the hall is one row of HALL_POLES poles. Startups take the best seats, and at least
+//   one pole stays empty for the next one. The rest show in the showcase (tour, search, link), one cloth at a time.
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
 import { Birds } from "./birds";
 import { ClothSim, type WindLook } from "./cloth";
 import { CLOUD_BOTTOM, CLOUD_TOP, CloudSea } from "./cloudSea";
-import { applyBacklight, applyRim, applySunRim, weaveNormalMap, type BacklightUniforms } from "./fabric";
+import { CLOTH_NORMAL_REPEAT, applyBacklight, applyRim, applySunRim, clothNormalMap, type BacklightUniforms } from "./fabric";
 import { Motes } from "./motes";
 import { poleMaterials } from "./pole";
 import { Post, type PostFx } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
-import { createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
+import { clothFinish, createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
 import { applyWave, flagGeometry, waveUniforms, type FoldUniforms, type WaveUniforms } from "./wave";
 
 // ---------- Layout (meters) ----------
@@ -47,16 +49,25 @@ const SUN_ELEVATION = 6.5;
 const SUN_AZIMUTH = 3.5; // behind the fly end of the Argentine flag in the start view: it peeks out as the cloth waves
 const HORIZON = new THREE.Color(0xf6c07a); // golden hour: amber haze, not the rose of late dusk
 // A warm spot on the Argentine flag keeps its face readable against the sun.
-const SPOT_GAIN = 2.5; // low: more, and the front light flattens the light coming through the cloth
+const SPOT_GAIN = 2.0; // low: more, and the front light flattens the light coming through the cloth (contre-jour)
 // The hero is a cloth simulation (cloth.ts), not a wave formula: wind speed in m/s, how hard the air carries
 // the cloth downwind, and how hard it pushes tilted patches. Tuned so the flag flies near level and billows.
 const ARG_CLOTH: WindLook = { speed: 11, drag: 2.2, lift: 3.2 };
 const ARG_SEGS: [number, number] = [35, 23];
 const ARG_RIM = 0.35;
+const BACKLIGHT = 1.85; // sun through the cloth: with the low spot, the flag glows from behind as in a sunset photo
+// Showcase (a picked flag, and the wallpaper): the startup's flag on its own pole right of the Argentine flag,
+// the same cloth at the same size. Its pole is a little shorter: the national flag keeps the place of honor
+// (higher, on the viewer's left). 3 m of sky between the Argentine fly end and the startup pole.
+const SHOW_X = ARG_X + ARG_W + 3;
+const SHOW_POLE_H = ARG_POLE_H - 1.2;
+const SHOW_WARMUP = 4; // s of simulated wind before the flag shows, so it flies instead of hanging flat
+const SHOW_EYE_Y = 6.2; // m, camera height in the showcase
+const CUT_MS = 260; // fade out, and back in, around a jump between the hall and the showcase
 const POLE_RIM = 1.6; // gold outline on the poles against the sun
 const BIRD_FLOCKS = 3;
 const MOTE_GAIN = 1.0; // HDR, added per speck. Deep amber: bright points tone-map to white, and white specks read as snow
-const FOG_DENSITY = 0.0012; // light: haze toward a low sun washes the whole frame out
+const FOG_DENSITY = 0.002; // aerial perspective: far rows fade into the amber haze. Much more washes the whole frame out
 
 // ---------- Camera ----------
 // Low and back, on a long lens, looking level: the eye sits just over the cloud tops, so the dark backlit
@@ -74,6 +85,12 @@ const YAW_LIMIT = 1.15; // rad either side of the corridor axis: you can look at
 const PITCH_MIN = -0.3, PITCH_MAX = 0.35;
 const EASE_MOVE = 4; // 1/s: how fast position catches its goal
 const EASE_LOOK = 9; // 1/s: how fast yaw and pitch catch theirs
+// Showcase orbit: the camera circles the pair, never turns away from it. Limits keep the sun behind the
+// cloths (it backlights them) and the eye above the cloud tops.
+const ORBIT_AZ = 0.6; // rad either side of the straight-on view
+const ORBIT_EL_MIN = -0.06, ORBIT_EL_MAX = 0.3; // rad below and above it
+const ORBIT_ZOOM_MIN = 0.7, ORBIT_ZOOM_MAX = 1.35; // times the framing distance
+const EASE_ORBIT = 7; // 1/s
 
 const ATLAS_COLS = 8;
 const ATLAS_TILE: [number, number] = [256, 168];
@@ -83,8 +100,16 @@ const TILE_BLANK = 0, TILE_PLACEHOLDER = 1;
 const PLACEHOLDER_COLORS = ["#fbfaf8", "#f6f5f3", "#fdfcfb", "#f3f2f1"]; // near white: the warm sunset tints them cream on its own
 const PLACEHOLDER_LIFT = 0.8; // under 1: backlit, the empty field glows gold but stays darker than the hero
 const FRONT_MARKS = 8; // the first empty slots (the best seats) show the "tu startup acá" mark; the rest only on hover
+// The hall, small on purpose: a big field of poles and cloths cost too much GPU and CPU on the home page.
+const HALL_POLES = 4;
+const HALL_INNER = 4.5; // m from the axis to the center of the inner cloths
+const HALL_DX = 4.5; // m between neighbors in a row: a cloth is 3.1 wide, so a gap of about 1.4 m
 const HOVER_GLOW = 0.1;
 const EASE_HOVER = 7; // 1/s
+
+// Sky and cloud sea resolution, per axis, against the drawing buffer. Both are soft: half resolution measured
+// 45 dB PSNR against full (no visible change) and cut the frame time by a third on an integrated GPU.
+const BACKDROP_SCALE = 0.5;
 
 type Tier = "high" | "low";
 const TIERS = {
@@ -118,6 +143,8 @@ export interface SalonEvents {
   onFx?: (fx: SalonFx) => void;
   /** The mouse moved onto a flag (or off every flag: null). For the hover label. */
   onHover?: (target: { kind: "startup" | "placeholder"; index: number } | null) => void;
+  /** The first real frames are on screen and the canvas starts to fade in. The UI drops its loader. */
+  onReady?: () => void;
 }
 
 interface Slot {
@@ -127,36 +154,32 @@ interface Slot {
 }
 
 /**
- * Grid size for n startups: at least 3 columns per side and 8 rows (48 poles), growing with n. Few poles,
- * far apart: a short gallery of flags you can look at one by one, not a field to the horizon.
+ * The hall: rows of four in front, two cloths each side of the hero, best seats first (inner, then outer,
+ * left before right). Cloths fly to the right of their pole, so each pole stands half a cloth left of the
+ * cloth center: the row looks even around the axis. Further rows stand DZ behind.
  */
-export function gridSize(n: number) {
-  const cols = Math.max(3, Math.ceil(Math.sqrt(n / 4)));
-  const rows = Math.max(8, Math.ceil(n / (2 * cols)) + 2);
-  return { cols, rows };
-}
-
-/**
- * Every slot of a `cols` x `rows` grid (per side), best seats first: the ones the start view sees well,
- * close to the corridor and to the front. Outer columns cost more than deeper rows, because the start view
- * looks down the corridor. Sides alternate, so both sides fill evenly. Startup i takes slot i.
- */
-export function gridSlots(cols: number, rows: number): Slot[] {
-  const seats: (Slot & { score: number })[] = [];
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      for (const side of [-1, 1] as const) {
-        seats.push({ x: side * (CORRIDOR + col * DX), z: FIRST_Z - row * DZ, side, score: col * 2.2 + row + (side > 0 ? 0.01 : 0) });
-      }
-    }
-  }
-  seats.sort((a, b) => a.score - b.score);
-  return seats.map(({ x, z, side }) => ({ x, z, side }));
+export function hallSlots(n: number): Slot[] {
+  return Array.from({ length: n }, (_, i) => {
+    const side: 1 | -1 = i % 2 === 0 ? -1 : 1;
+    const col = Math.floor((i % 4) / 2);
+    return { x: side * (HALL_INNER + col * HALL_DX) - FLAG_W / 2, z: FIRST_Z - Math.floor(i / 4) * DZ, side };
+  });
 }
 
 /** Wave phase per flag: golden-angle steps, so neighbors never move in step. */
 export function phaseOf(i: number) {
   return (i * 2.39996) % (Math.PI * 2);
+}
+
+/** The pair shot: the picked startup's cloth next to the Argentine flag. */
+interface Showcase {
+  mesh: THREE.Mesh;
+  tex: THREE.CanvasTexture;
+  canvas: HTMLCanvasElement;
+  geo: THREE.BufferGeometry;
+  cloth: ClothSim | null;
+  parts: THREE.Object3D[]; // pole, finial, cloth, spot: shown and hidden together
+  painted: "none" | "color" | "logo";
 }
 
 interface NearFlag {
@@ -185,6 +208,8 @@ interface Claim {
 export class SalonScene {
   private renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
+  // Sky and cloud sea: ray-marched and soft, so they render at a lower resolution (Post, backdrop).
+  private backdrop = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   sky: SunsetSky;
   clouds: CloudSea;
@@ -196,6 +221,7 @@ export class SalonScene {
   private sunDir: THREE.Vector3;
   private sunColor = new THREE.Color(1.0, 0.7, 0.42);
   private list: PublicStartup[] = [];
+  private poled = 0; // startups on a hall pole: list[i] stands in slot i for i < poled. The rest show only in the showcase
   private slots: Slot[] = [];
   private cols = 10;
   private time = 0;
@@ -238,6 +264,10 @@ export class SalonScene {
   private inset = { right: 0, bottom: 0, goalRight: 0, goalBottom: 0 };
   private size = { w: 1, h: 1 };
   private frames = 0; // the canvas fades in after the first frames, so shader compiles never show
+  private show: Showcase | null = null;
+  private showing = -1; // startup index in the showcase, -1 = the hall
+  private cutTimer = 0;
+  private capturing = false; // a wallpaper shot owns the canvas: the loop skips its frames until it is done
 
   // Camera
   private pos = START.clone();
@@ -247,6 +277,7 @@ export class SalonScene {
   private goalPos = START.clone();
   private goalYaw = START_YAW;
   private goalPitch = START_PITCH;
+  private orbit = { az: 0, el: 0, zoom: 1, goalAz: 0, goalEl: 0, goalZoom: 1 };
   private flight: {
     from: THREE.Vector3; to: THREE.Vector3; yaw0: number; yaw1: number; p0: number; p1: number; t: number; dur: number;
     select: number | null; intro?: boolean;
@@ -287,12 +318,13 @@ export class SalonScene {
     this.scene.fog = new THREE.FogExp2(HORIZON.clone(), FOG_DENSITY);
     this.scene.background = HORIZON.clone();
     this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON });
-    this.scene.add(this.sky.group);
+    this.backdrop.background = HORIZON.clone();
+    this.backdrop.add(this.sky.group);
     this.scene.environment = this.sky.environment(renderer);
     // Low sky fill: contre-jour needs real shadow. More fill flattens it back to a grey haze.
     this.scene.environmentIntensity = 0.45;
-    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY }, t.steps);
-    this.scene.add(this.clouds.group);
+    this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, fogDensity: FOG_DENSITY }, t.steps);
+    this.backdrop.add(this.clouds.group);
     // Golden dust in the air, lit by the low sun. Count by device tier, fixed for the session.
     this.motes = new Motes(t.motes, new THREE.Color(1, 0.5, 0.15).multiplyScalar(MOTE_GAIN));
     this.scene.add(this.motes.points);
@@ -307,7 +339,7 @@ export class SalonScene {
     this.scene.add(new THREE.HemisphereLight(0xc4cbe0, 0xf2b070, 0.35));
 
     const bl = (): BacklightUniforms => ({
-      uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: 1.6 }, uGlow: { value: 0 },
+      uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: BACKLIGHT }, uGlow: { value: 0 },
     });
     this.argUniforms = { ...waveUniforms(ARG_W, ARG_H, 0.6), ...bl() };
     this.farUniforms = { ...waveUniforms(FLAG_W, FLAG_H), ...bl() };
@@ -323,7 +355,7 @@ export class SalonScene {
     this.drawPlaceholderTile();
     this.farMaterial = this.atlasMaterial();
 
-    this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx);
+    this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx, this.backdrop, BACKDROP_SCALE);
     this.intro();
 
     this.resize();
@@ -337,7 +369,7 @@ export class SalonScene {
 
   // ---------- Public API ----------
 
-  /** Lays out the grid. New startups (not in the previous call) rise up their pole. */
+  /** Lays out the hall. New startups on a pole (not in the previous call) rise up it. */
   setStartups(list: PublicStartup[]) {
     const prevIds = this.knownIds;
     this.list = list;
@@ -351,10 +383,10 @@ export class SalonScene {
       this.scene.remove(m);
       m.geometry.dispose();
     }
-    const { cols, rows } = gridSize(list.length);
-    this.cols = cols;
-    const count = cols * 2 * rows;
-    this.slots = gridSlots(cols, rows);
+    this.poled = Math.min(list.length, HALL_POLES - 1); // one pole always free: the hoist needs it
+    const count = HALL_POLES;
+    this.cols = 2;
+    this.slots = hallSlots(count);
 
     // Brushed, weathered aluminium (shared with the pair page), not chrome: at this distance a mirror finish reads as CG.
     const metal = this.rimmed().metal;
@@ -374,7 +406,7 @@ export class SalonScene {
     farGeo.setAttribute("aAtlas", this.aAtlas);
     farGeo.setAttribute("aGlow", this.aGlow);
     const marks = new Float32Array(count);
-    for (let i = 0; i < count; i++) marks[i] = this.baseMark(i, list.length);
+    for (let i = 0; i < count; i++) marks[i] = this.baseMark(i);
     this.aMark = new THREE.InstancedBufferAttribute(marks, 1);
     farGeo.setAttribute("aMark", this.aMark);
     this.hovered = -1;
@@ -392,7 +424,7 @@ export class SalonScene {
       this.finials.setMatrixAt(i, m);
       this.far.setMatrixAt(i, this.flagMatrix(i, m));
       phases[i] = phaseOf(i);
-      const real = i < list.length;
+      const real = i < this.poled;
       if (real) color.set(list[i].bgColor);
       else color.set(PLACEHOLDER_COLORS[(i * 7 + (i >> 3)) % PLACEHOLDER_COLORS.length]).multiplyScalar(PLACEHOLDER_LIFT);
       this.far.setColorAt(i, color);
@@ -401,16 +433,20 @@ export class SalonScene {
       atlasAttr[i * 2 + 1] = o[1];
     }
     if (prevIds) {
-      list.forEach((s, i) => {
-        if (!prevIds.has(s.id)) this.rising.set(i, this.time);
-      });
+      for (let i = 0; i < this.poled; i++) if (!prevIds.has(list[i].id)) this.rising.set(i, this.time);
     }
     for (const mesh of [this.shafts, this.finials, this.far]) this.scene.add(mesh);
+    // In the showcase, the new hall stays hidden. Its startup left the list: back to the hall.
+    if (this.showing >= list.length) this.leaveShowcase();
+    else if (this.showing >= 0) {
+      this.setHall(false);
+      this.paintShowcase();
+    }
     // A new startup took the claimed slot: an open sheet moves to the next free seat, a closed one lets go.
-    if (this.claim && this.claim.slot < list.length) {
+    if (this.claim && (this.claim.slot < this.poled || this.claim.slot >= count)) {
       if (this.claim.released) this.dropClaim();
       else {
-        this.claim.slot = list.length;
+        this.claim.slot = this.poled;
         this.placeClaim();
       }
     }
@@ -424,16 +460,17 @@ export class SalonScene {
    * Takes empty slot `slot` (default: the best free seat) for the visitor's flag and flies to look at it from
    * above the row in front. A second call moves the flag to the new slot and keeps its paint.
    */
-  claimSlot(slot = this.list.length) {
-    if (slot < this.list.length || !this.slots[slot]) slot = this.list.length;
+  claimSlot(slot = this.poled) {
+    if (slot < this.poled || !this.slots[slot]) slot = this.poled;
     const p = this.slots[slot];
     if (!p) return;
     if (this.claim?.released) this.dropClaim();
+    this.leaveShowcase(); // the hoist happens in the hall
     // Remember the view on the first claim, so closing the sheet flies back to it.
     if (!this.claim) this.beforeClaim = { pos: this.pos.clone(), yaw: this.yaw, pitch: this.pitch };
     if (!this.claim) {
       const flag = this.makeFlag();
-      drawStartupFlag(flag.canvas, { logo: null, bg: "#ffffff" });
+      drawStartupFlag(flag.canvas, { logo: null, bg: "#ffffff", weave: clothFinish(flag.canvas.width, flag.canvas.height) });
       flag.texture.needsUpdate = true;
       this.claim = { slot, flag, hoist: 1, from: 1, target: 1, start: 0, dur: 1, done: null, released: false };
     }
@@ -463,7 +500,7 @@ export class SalonScene {
   setStartup(logo: LogoImage | null, bg: string) {
     const c = this.claim;
     if (!c) return;
-    drawStartupFlag(c.flag.canvas, { logo, bg });
+    drawStartupFlag(c.flag.canvas, { logo, bg, weave: clothFinish(c.flag.canvas.width, c.flag.canvas.height) });
     c.flag.texture.needsUpdate = true;
   }
 
@@ -550,10 +587,27 @@ export class SalonScene {
     else if (this.camera.view?.enabled) this.camera.clearViewOffset();
   }
 
-  /** Flies to stand in front of startup flag `i`, highlights it, and reports the selection on arrival. */
+  /**
+   * Shows startup flag `i` alone with the Argentine flag: the showcase (see `enterShowcase`). A quick fade
+   * hides the cut, and the card opens as the view fades back in.
+   */
   focus(i: number) {
+    if (i < 0 || i >= this.list.length) return;
+    this.setHighlight([i]);
+    if (this.showing === i) {
+      this.events.onSelect?.(i);
+      return;
+    }
+    this.cut(() => {
+      this.enterShowcase(i);
+      this.events.onSelect?.(i);
+    });
+  }
+
+  /** Flies through the hall to stand in front of startup flag `i`, and reports the selection on arrival. */
+  private flyToFlag(i: number) {
     const p = this.slots[i];
-    if (!p || i >= this.list.length) return;
+    if (!p) return;
     // Frame the flag at about half the screen width, whatever the lens and the screen shape: on the long lens
     // a fixed distance either crops it (portrait) or leaves it small (wide screens). From that far back the
     // row in front can stand in the way, so the eye rises a little and leans toward the corridor: the line of
@@ -566,20 +620,29 @@ export class SalonScene {
     // Aim a touch to the right of the flag on wide screens, so it sits left of center, clear of the card.
     const look = center.clone().add(new THREE.Vector3(this.camera.aspect > 1 ? 0.8 : 0, 0, 0));
     this.flyTo(stand, look, i);
-    this.setHighlight([i]);
   }
 
-  /** Glows these startup flags (search, city filter). Empty clears. */
+  /** Glows these startup flags (search, city filter), the ones on a hall pole. Empty clears. */
   setHighlight(indices: number[]) {
-    this.highlight = new Set(indices.filter((i) => i >= 0 && i < this.list.length));
+    this.highlight = new Set(indices.filter((i) => i >= 0 && i < this.poled));
     if (this.aGlow) {
       (this.aGlow.array as Float32Array).fill(0);
       this.aGlow.needsUpdate = true;
     }
   }
 
-  /** Flies to the nearest of these flags (city filter) and highlights all of them. */
+  /**
+   * Flies through the hall to the nearest of these flags (city filter, search) and highlights all of them.
+   * Several matches only make sense among the others, so this leaves the showcase. Startups off the poles
+   * have no hall flag to fly to: when none is on a pole, the first match opens in the showcase.
+   */
   focusAny(indices: number[]) {
+    const onPole = indices.filter((i) => i < this.poled);
+    if (!onPole.length && indices.length) {
+      this.focus(indices[0]);
+      return;
+    }
+    indices = onPole;
     if (!indices.length) {
       this.setHighlight([]);
       return;
@@ -594,15 +657,28 @@ export class SalonScene {
         best = i;
       }
     }
-    this.focus(best);
-    this.setHighlight(indices);
+    const go = () => {
+      this.flyToFlag(best);
+      this.setHighlight(indices);
+    };
+    if (this.showing >= 0) {
+      this.cut(() => {
+        this.leaveShowcase();
+        go();
+      });
+    } else go();
   }
 
-  /** Back to the start view, facing the sun and the Argentine flag. */
+  /** Back to the start view, facing the sun and the Argentine flag. From the showcase: the hall fades back first. */
   home() {
-    const look = this.lookFrom(START, START_YAW, START_PITCH);
-    this.flyTo(START.clone(), look, null);
     this.setHighlight([]);
+    const go = () => this.flyTo(START.clone(), this.lookFrom(START, START_YAW, START_PITCH), null);
+    if (this.showing >= 0) {
+      this.cut(() => {
+        this.leaveShowcase();
+        go();
+      });
+    } else go();
   }
 
   /**
@@ -610,7 +686,7 @@ export class SalonScene {
    * Any input takes over at once. Skipped for visitors who ask for reduced motion.
    */
   private intro() {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (this.reducedMotion()) return;
     this.pos.copy(INTRO_FROM);
     this.goalPos.copy(INTRO_FROM);
     this.pitch = this.goalPitch = INTRO_PITCH;
@@ -620,8 +696,18 @@ export class SalonScene {
     };
   }
 
+  private reducedMotion() {
+    return !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }
+
   /** Along the corridor axis only, whatever the yaw: at either end the camera stops, it never slides sideways. */
   walk(meters: number) {
+    if (this.showing >= 0) {
+      // The showcase: closer to or further from the pair, along the line to it.
+      const o = this.orbit;
+      o.goalZoom = THREE.MathUtils.clamp(o.goalZoom * Math.exp(-meters * 0.04), ORBIT_ZOOM_MIN, ORBIT_ZOOM_MAX);
+      return;
+    }
     this.flight = null;
     this.goalPos.z -= meters;
     this.clampPos();
@@ -629,36 +715,238 @@ export class SalonScene {
 
   private turn(dYaw: number, dPitch: number) {
     this.flight = null;
-    this.goalYaw = THREE.MathUtils.clamp(this.goalYaw + dYaw, -YAW_LIMIT, YAW_LIMIT);
-    this.goalPitch = THREE.MathUtils.clamp(this.goalPitch + dPitch, PITCH_MIN, PITCH_MAX);
+    if (this.showing >= 0) {
+      // The showcase: drag circles the pair. Drag right, the pair turns right (the camera goes left).
+      const o = this.orbit;
+      o.goalAz = THREE.MathUtils.clamp(o.goalAz - dYaw, -ORBIT_AZ, ORBIT_AZ);
+      o.goalEl = THREE.MathUtils.clamp(o.goalEl + dPitch, ORBIT_EL_MIN, ORBIT_EL_MAX);
+      return;
+    }
+    this.goalYaw += dYaw;
+    this.goalPitch += dPitch;
+    this.clampLook();
   }
 
-  /** Offscreen render at full quality, whatever the tier. Returns a JPEG. */
-  async snapshot(width: number, height: number): Promise<Blob> {
+  /**
+   * Keeps the center of the hall view on the flags: yaw and pitch stay inside the angles, seen from the
+   * camera's goal, of the box around every cloth and the Argentine flag. The view turns around the flags,
+   * never off into empty sky. The fixed limits still apply on top.
+   */
+  private clampLook() {
+    const xs = this.slots.map((s) => s.x);
+    const zs = this.slots.map((s) => s.z);
+    const x0 = Math.min(ARG_X, ...xs), x1 = Math.max(ARG_X + ARG_W, ...xs.map((x) => x + FLAG_W));
+    const z0 = Math.min(ARG_Z, ...zs), z1 = Math.max(ARG_Z, ...zs);
+    const y0 = POLE_H - FLAG_H, y1 = ARG_POLE_H;
+    const g = this.goalPos;
+    let yawMin = Infinity, yawMax = -Infinity, pitchMin = Infinity, pitchMax = -Infinity;
+    for (const x of [x0, x1]) for (const z of [z0, z1]) for (const y of [y0, y1]) {
+      const dx = x - g.x, dy = y - g.y, dz = z - g.z;
+      const yaw = Math.atan2(-dx, -dz), pitch = Math.atan2(dy, Math.hypot(dx, dz));
+      yawMin = Math.min(yawMin, yaw); yawMax = Math.max(yawMax, yaw);
+      pitchMin = Math.min(pitchMin, pitch); pitchMax = Math.max(pitchMax, pitch);
+    }
+    yawMin = Math.max(yawMin, -YAW_LIMIT); yawMax = Math.min(yawMax, YAW_LIMIT);
+    pitchMin = Math.max(pitchMin, PITCH_MIN); pitchMax = Math.min(pitchMax, PITCH_MAX);
+    this.goalYaw = yawMin <= yawMax ? THREE.MathUtils.clamp(this.goalYaw, yawMin, yawMax) : 0;
+    this.goalPitch = pitchMin <= pitchMax ? THREE.MathUtils.clamp(this.goalPitch, pitchMin, pitchMax) : START_PITCH;
+  }
+
+  /** Fades the canvas out, runs `apply` (a scene change), and fades back in. Reduced motion: a plain cut. */
+  private cut(apply: () => void) {
+    const c = this.renderer.domElement;
+    clearTimeout(this.cutTimer);
+    if (this.reducedMotion() || this.frames < 3) {
+      apply();
+      return;
+    }
+    c.style.transition = `opacity ${CUT_MS}ms ease`;
+    c.style.opacity = "0";
+    this.cutTimer = window.setTimeout(() => {
+      if (this.disposed) return;
+      apply();
+      c.style.opacity = "1";
+    }, CUT_MS + 20);
+  }
+
+  // ---------- Showcase ----------
+  // A picked startup flag stands alone with the Argentine flag: its own pole right of the hero, the same
+  // simulated cloth at the same size, the same material, rim, and spot. The hall (field, poles, the cheap
+  // wave flags) is hidden. Built once on first use, then repainted for each startup.
+
+  /** The pair's pole and cloth, built like the hero's (buildArgentina). */
+  private showcaseParts(): Showcase {
+    if (this.show) return this.show;
+    const { metal, gold } = this.rimmed();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, SHOW_POLE_H + POLE_DEPTH, 16, 1, true), metal);
+    shaft.position.set(SHOW_X, (SHOW_POLE_H - POLE_DEPTH) / 2, ARG_Z);
+    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10), gold);
+    finial.position.set(SHOW_X, SHOW_POLE_H + 0.24, ARG_Z);
+
+    const canvas = createCanvas(2100, 1350); // 1.5x the hero's canvas: the logo stays sharp at 4K
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const mat = this.fabricMaterial(tex, { ...waveUniforms(ARG_W, ARG_H, 0.6), ...this.backlight() }, null, false);
+    applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
+    const geo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.position.set(SHOW_X + 0.12, SHOW_POLE_H - 0.25, ARG_Z);
+
+    const center = new THREE.Vector3(SHOW_X + ARG_W / 2, SHOW_POLE_H - 0.25 - ARG_H / 2, ARG_Z);
+    const spot = new THREE.SpotLight(0xffd08a, SPOT_GAIN, 0, 0.16, 0.85, 0);
+    spot.position.copy(center).add(new THREE.Vector3(0, 30, 18));
+    spot.target.position.copy(center);
+
+    const parts = [shaft, finial, mesh, spot, spot.target];
+    for (const p of parts) p.visible = false;
+    this.scene.add(...parts);
+    this.show = { mesh, tex, canvas, geo, cloth: null, parts, painted: "none" };
+    return this.show;
+  }
+
+  /** Hides or shows the hall: the field, its poles, the near flags, and the visitor's flag. */
+  private setHall(on: boolean) {
+    for (const m of [this.far, this.shafts, this.finials]) if (m) m.visible = on;
+    for (const n of this.near) n.mesh.visible = on && n.index >= 0;
+    if (this.claim) this.claim.flag.mesh.visible = on;
+  }
+
+  /** Puts startup `i` in the showcase. `aim`: also moves the camera to the showcase view. */
+  private enterShowcase(i: number, aim = true) {
+    const s = this.showcaseParts();
+    if (this.hovered >= 0) {
+      this.hovered = -1;
+      this.events.onHover?.(null);
+    }
+    this.showing = i;
+    s.mesh.userData.index = i;
+    this.paintShowcase();
+    // A fresh cloth each time, flown for a few seconds while the view is faded out: it arrives flying.
+    s.cloth = new ClothSim(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1], ARG_CLOTH);
+    for (let t = 0; t < SHOW_WARMUP; t += 1 / 60) s.cloth.update(1 / 60, s.geo);
+    for (const p of s.parts) p.visible = true;
+    this.setHall(false);
+    if (aim) this.aimShowcase();
+  }
+
+  /** Puts the camera on the showcase view for the current screen shape. */
+  private aimShowcase() {
+    this.orbit = { az: 0, el: 0, zoom: 1, goalAz: 0, goalEl: 0, goalZoom: 1 };
+    this.placeOrbit();
+  }
+
+  /**
+   * Puts the camera on the showcase orbit: the straight-on framing (showcaseView), turned by the orbit angles
+   * around the point between the two cloths, and always looking at it.
+   */
+  private placeOrbit() {
+    const { pos: base, look } = this.showcaseView(this.camera.aspect);
+    const o = this.orbit;
+    const off = base.sub(look);
+    const r = off.length() * o.zoom;
+    const az = Math.atan2(off.x, off.z) + o.az;
+    const el = Math.asin(off.y / off.length()) + o.el;
+    const pos = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(r).add(look);
+    pos.y = Math.max(pos.y, CLOUD_TOP + 3);
+    const d = look.clone().sub(pos);
+    this.flight = null;
+    this.pos.copy(pos);
+    this.goalPos.copy(pos);
+    this.yaw = this.goalYaw = Math.atan2(-d.x, -d.z);
+    this.pitch = this.goalPitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
+  }
+
+  /** Back to the hall. The camera stays put: the caller moves it. */
+  private leaveShowcase() {
+    if (this.showing < 0) return;
+    this.showing = -1;
+    if (this.show) for (const p of this.show.parts) p.visible = false;
+    this.setHall(true);
+    this.lodTimer = 0;
+  }
+
+  /** Paints the showcase cloth for the current startup. Called again once its logo loads. */
+  private paintShowcase() {
+    const s = this.show, st = this.list[this.showing];
+    if (!s || !st) return;
+    const logo = this.logoFor(this.showing);
+    drawStartupFlag(s.canvas, { logo, bg: st.bgColor, weave: clothFinish(s.canvas.width, s.canvas.height) });
+    s.tex.needsUpdate = true;
+    s.painted = logo ? "logo" : "color";
+  }
+
+  /** Camera for the showcase: both cloths across most of the width, from just over the clouds, looking up a little. */
+  private showcaseView(aspect: number) {
+    const left = ARG_X, right = SHOW_X + ARG_W * 1.05;
+    const look = new THREE.Vector3((left + right) / 2, ARG_POLE_H - ARG_H * 0.55, ARG_Z);
+    const halfW = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect);
+    const fill = aspect < 1 ? 0.92 : 0.75; // portrait: as wide as it goes, the pair is wide
+    const dist = Math.max(18, (right - left) / fill / (2 * Math.tan(halfW)));
+    // The eye stands square in front of the Argentine flag, as in the start view: the low sun sits right
+    // behind the hero's cloth and shines through it. Between the two flags, it washes the whole frame out.
+    // High enough to clear the billows: lower, the eye sinks into a cloud and the frame turns to haze.
+    return { pos: new THREE.Vector3(ARG_CENTER.x, SHOW_EYE_Y, ARG_Z + dist), look };
+  }
+
+  /**
+   * A wallpaper for startup `i`: the showcase, rendered offscreen at `width` x `height` with the high tier,
+   * whatever the screen. The live view goes back as it was. Returns a JPEG.
+   */
+  async wallpaper(i: number, width: number, height: number): Promise<Blob> {
+    const st = this.list[i];
+    if (!st) throw new Error("No se encontró la bandera.");
+    // The logo usually loaded already (the flag is on screen). If not, give it a moment.
+    for (let k = 0; !this.logoFor(i) && st.logoUrl && this.images.get(st.logoUrl) === "loading" && k < 40; k++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const prevShowing = this.showing;
     const prevTier = this.tier;
     const size = new THREE.Vector2();
     this.renderer.getSize(size);
     const prevDpr = this.renderer.getPixelRatio();
+    this.capturing = true;
     this.camera.clearViewOffset(); // the loop puts it back next frame
     if (prevTier !== "high") this.applyTier("high");
+    this.post.setBackdropScale(1); // a still image: the sky and clouds at full resolution
     this.renderer.setPixelRatio(1);
     this.post.setSize(width, height);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.updateLod();
-    this.post.render(1 / 60);
-    const blob = await new Promise<Blob | null>((res) => this.renderer.domElement.toBlob(res, "image/jpeg", 0.92));
-    this.renderer.setPixelRatio(prevDpr);
-    if (prevTier !== "high") this.applyTier(prevTier);
-    this.post.setSize(size.x, size.y);
-    this.resize();
-    if (!blob) throw new Error("No se pudo generar la imagen.");
-    return blob;
+    if (this.showing !== i) this.enterShowcase(i, false);
+    else if (this.show?.painted !== "logo") this.paintShowcase();
+    // The hero can still hang flat (a fresh load, or a tab in the background stalls its sim): fly it a little.
+    if (this.argCloth && this.argGeo) for (let t = 0; t < SHOW_WARMUP; t += 1 / 60) this.argCloth.update(1 / 60, this.argGeo);
+    const { pos, look } = this.showcaseView(width / height);
+    this.camera.position.copy(pos);
+    this.camera.lookAt(look);
+    this.camera.updateMatrixWorld();
+    this.sky.update(this.time, this.camera);
+    this.clouds.update(this.time, this.camera);
+    try {
+      this.post.render(1 / 60);
+      const blob = await new Promise<Blob | null>((res) => this.renderer.domElement.toBlob(res, "image/jpeg", 0.95));
+      if (!blob) throw new Error("No se pudo generar la imagen.");
+      return blob;
+    } finally {
+      if (prevShowing < 0) this.leaveShowcase();
+      else if (prevShowing !== i) this.enterShowcase(prevShowing, false);
+      this.renderer.setPixelRatio(prevDpr);
+      if (prevTier !== "high") this.applyTier(prevTier);
+      this.post.setBackdropScale(BACKDROP_SCALE);
+      this.post.setSize(size.x, size.y);
+      this.resize();
+      this.capturing = false;
+    }
   }
 
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.cutTimer);
+    this.show?.tex.dispose();
     this.resizeObserver.disconnect();
     this.post.dispose();
     this.clouds.dispose();
@@ -710,7 +998,7 @@ export class SalonScene {
     this.scene.add(shaft, finial);
 
     const canvas = createCanvas(1400, 900);
-    drawArgentineFlag(canvas);
+    drawArgentineFlag(canvas, clothFinish(canvas.width, canvas.height));
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
@@ -734,13 +1022,15 @@ export class SalonScene {
 
   /** `fold`: fold shading and sun through the cloth. Without it, the field's gust wave. `wave` false: no motion (simulated cloth). */
   private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms, fold: FoldUniforms | null = null, wave = true) {
-    const normal = weaveNormalMap();
+    const normal = clothNormalMap();
+    normal.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const mat = new THREE.MeshPhysicalMaterial({
-      map, side: THREE.DoubleSide, roughness: 0.94, metalness: 0, specularIntensity: 0.12,
-      sheen: 0.5, sheenColor: new THREE.Color(0xf4ece6), sheenRoughness: 0.9,
-      normalMap: normal, normalScale: new THREE.Vector2(0.12, 0.12),
+      // Sheen tinted by the print (sheenColorMap): a white sheen read as milky glare on dark and blue cloth.
+      map, side: THREE.DoubleSide, roughness: 0.94, metalness: 0, specularIntensity: 0.05, envMapIntensity: 0.5,
+      sheen: 0.35, sheenColor: new THREE.Color(0xffffff), sheenColorMap: map, sheenRoughness: 0.9,
+      normalMap: normal, normalScale: new THREE.Vector2(0.9, 0.9),
     });
-    mat.normalMap!.repeat.set(36, 24);
+    mat.normalMap!.repeat.set(...CLOTH_NORMAL_REPEAT);
     if (wave) applyWave(mat, uniforms, false, !fold, fold);
     return applyBacklight(mat, uniforms);
   }
@@ -806,8 +1096,8 @@ export class SalonScene {
   }
 
   /** Mark strength for slot i at rest: startups 1 (their tile is the logo), front empty slots 1, the rest 0. */
-  private baseMark(i: number, startups = this.list.length) {
-    return i < startups + FRONT_MARKS ? 1 : 0;
+  private baseMark(i: number) {
+    return i < this.poled + FRONT_MARKS ? 1 : 0;
   }
 
   /** Eases the hovered empty slot in (mark and a faint warm glow) and the previous one back out. */
@@ -863,7 +1153,7 @@ export class SalonScene {
     );
     const sphere = new THREE.Sphere(new THREE.Vector3(), 4);
     const visible: { i: number; d: number }[] = [];
-    for (let i = 0; i < this.list.length; i++) {
+    for (let i = 0; i < this.poled; i++) {
       const p = this.slots[i];
       sphere.center.set(p.x + FLAG_W / 2, POLE_H - FLAG_H / 2, p.z);
       const d = sphere.center.distanceToSquared(this.pos);
@@ -900,7 +1190,7 @@ export class SalonScene {
     for (const [i] of this.atlasSlots) if (!midKeep.has(i)) this.atlasSlots.delete(i);
     const used = new Set(this.atlasSlots.values());
     const attr = this.aAtlas!;
-    for (let i = 0; i < this.list.length; i++) {
+    for (let i = 0; i < this.poled; i++) {
       const o = this.tileOffset(this.atlasSlots.get(i) ?? TILE_BLANK);
       attr.setXY(i, o[0], o[1]);
     }
@@ -928,7 +1218,7 @@ export class SalonScene {
   private drawTile(tile: number, i: number, img: LogoImage) {
     const [tw, th] = ATLAS_TILE;
     const c = createCanvas(tw, th);
-    drawStartupFlag(c, { logo: img, bg: this.list[i].bgColor });
+    drawStartupFlag(c, { logo: img, bg: this.list[i].bgColor, weave: clothFinish(tw, th) });
     const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
     this.atlasCanvas.getContext("2d")!.drawImage(c, col * tw, row * th);
     this.atlasDirty = true;
@@ -980,7 +1270,7 @@ export class SalonScene {
   }
 
   private backlight(): BacklightUniforms {
-    return { uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: 1.6 }, uGlow: { value: 0 } };
+    return { uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: BACKLIGHT }, uGlow: { value: 0 } };
   }
 
   private assignNear(n: NearFlag, i: number) {
@@ -988,7 +1278,7 @@ export class SalonScene {
     n.painted = "none";
     n.uniforms.uPhase.value = phaseOf(i);
     n.mesh.userData.index = i;
-    n.mesh.visible = true;
+    n.mesh.visible = this.showing < 0;
     this.placeNear(n);
     this.paintNear(n);
   }
@@ -1001,7 +1291,7 @@ export class SalonScene {
   private paintNear(n: NearFlag) {
     const s = this.list[n.index];
     const img = this.logoFor(n.index);
-    drawStartupFlag(n.canvas, { logo: img, bg: s.bgColor });
+    drawStartupFlag(n.canvas, { logo: img, bg: s.bgColor, weave: clothFinish(n.canvas.width, n.canvas.height) });
     n.texture.needsUpdate = true;
     n.painted = img ? "logo" : "color";
   }
@@ -1076,6 +1366,10 @@ export class SalonScene {
   private loop = (now: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
+    if (this.capturing) {
+      this.last = now;
+      return;
+    }
     const rawDt = (now - this.last) / 1000;
     const dt = Math.min(rawDt, 0.1);
     this.last = now;
@@ -1108,9 +1402,18 @@ export class SalonScene {
         if (f.select !== null) this.events.onSelect?.(f.select);
       }
     }
-    if (!this.flight) {
+    if (!this.flight && this.showing >= 0) {
+      const o = this.orbit, k = 1 - Math.exp(-EASE_ORBIT * dt);
+      if (Math.abs(o.goalAz - o.az) + Math.abs(o.goalEl - o.el) + Math.abs(o.goalZoom - o.zoom) > 1e-5) {
+        o.az += (o.goalAz - o.az) * k;
+        o.el += (o.goalEl - o.el) * k;
+        o.zoom += (o.goalZoom - o.zoom) * k;
+        this.placeOrbit();
+      }
+    } else if (!this.flight) {
       // Frame-rate independent ease toward the goals.
       this.pos.lerp(this.goalPos, 1 - Math.exp(-EASE_MOVE * dt));
+      this.clampLook(); // walking changes the angles to the flags
       const look = 1 - Math.exp(-EASE_LOOK * dt);
       this.yaw += (this.goalYaw - this.yaw) * look;
       this.pitch += (this.goalPitch - this.pitch) * look;
@@ -1126,6 +1429,7 @@ export class SalonScene {
     this.motes.update(this.time);
     this.birds.update(this.time);
     if (this.argCloth && this.argGeo) this.argCloth.update(dt, this.argGeo);
+    if (this.showing >= 0 && this.show?.cloth) this.show.cloth.update(dt, this.show.geo);
 
     // Rising flags and highlight pulse.
     if (this.rising.size && this.far) {
@@ -1151,11 +1455,15 @@ export class SalonScene {
     this.lodTimer -= dt;
     if (this.lodTimer <= 0) {
       this.updateLod();
+      if (this.showing >= 0 && this.show?.painted !== "logo" && this.logoFor(this.showing)) this.paintShowcase();
       this.lodTimer = 0.25;
     }
     this.post.render(dt);
     // Fade in once real frames are on screen: the first ones compile shaders and can stall.
-    if (++this.frames === 3) this.renderer.domElement.style.opacity = "1";
+    if (++this.frames === 3) {
+      this.renderer.domElement.style.opacity = "1";
+      this.events.onReady?.();
+    }
   };
 
   private clampPos() {
@@ -1180,19 +1488,25 @@ export class SalonScene {
     this.camera.fov = w / h < 1 ? Math.min(70, FOV * (1 / (w / h)) * 0.75) : FOV;
     this.camera.updateProjectionMatrix();
     this.lodTimer = 0;
+    if (this.showing >= 0) this.placeOrbit(); // a new screen shape needs a new framing; the orbit stays
   }
 
   private pick(e: { clientX: number; clientY: number }): { kind: "startup" | "placeholder"; index: number } | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
+    if (this.showing >= 0) {
+      // The showcase cloth is the only flag to pick. The raycaster does not skip hidden meshes.
+      const hit = this.show && this.raycaster.intersectObject(this.show.mesh, false)[0];
+      return hit ? { kind: "startup", index: this.showing } : null;
+    }
     const targets: THREE.Object3D[] = this.near.filter((n) => n.index >= 0).map((n) => n.mesh);
     if (this.far) targets.push(this.far);
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
     const index = hit.object === this.far ? hit.instanceId ?? -1 : (hit.object.userData.index as number);
     if (index < 0) return null;
-    return { kind: index < this.list.length ? "startup" : "placeholder", index };
+    return { kind: index < this.poled ? "startup" : "placeholder", index };
   }
 
   private bindInput(canvas: HTMLCanvasElement) {
@@ -1237,6 +1551,7 @@ export class SalonScene {
         else {
           this.setHighlight([]);
           this.events.onSelect?.(null);
+          if (this.showing >= 0) this.home(); // the showcase without its card: back to the hall
         }
       }
     };
