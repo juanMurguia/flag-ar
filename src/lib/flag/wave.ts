@@ -112,12 +112,26 @@ vec3 flagDisplace(vec3 p, float phase) {
   return vec3(x, y, z);
 }
 #else
+// Pole position in world xz. Gust fronts are a field in world space, so neighbors feel the same gust.
+vec2 flagOrigin() {
+#ifdef USE_INSTANCING
+  return (modelMatrix * instanceMatrix[3]).xz;
+#else
+  return modelMatrix[3].xz;
+#endif
+}
+
 // Hall of Fame: many small flags seen face-on.
+// No two flags share a rhythm: each has its own beat (from its phase), and gust fronts roll across the
+// field downwind (+x), so a gust reaches one row of flags, then the next. In a lull the cloth droops.
 vec3 flagDisplace(vec3 p, float phase) {
   float u = clamp(p.x / uSize.x, 0.0, 1.0);   // 0 at the pole, 1 at the fly end
   float v = clamp(-p.y / uSize.y, 0.0, 1.0);  // 0 at the top, 1 at the bottom
-  float w = clamp(uWind, 0.0, 2.0);
-  float t = uTime * 1.5707963 + phase;          // 2π / 4 s
+  vec2 o = flagOrigin();
+  float front = snoise(vec3((o.x - uTime * 7.0) / 38.0, o.y / 30.0, uTime * 0.06));
+  float w = clamp(uWind * (0.88 + 0.3 * front), 0.0, 2.0);
+  float beat = 0.78 + 0.44 * fract(sin(phase * 91.7) * 4375.85);
+  float t = uTime * 1.5707963 * beat + phase;
   float k = 6.2831853 / uSize.x;
 
   // Travelling waves from the pole outward. Amplitude grows toward the free edge.
@@ -136,7 +150,7 @@ vec3 flagDisplace(vec3 p, float phase) {
   // Simplex ripples that travel downwind, and slow gusts that swell and calm each flag on its own
   // beat (the 4 s export loop does not apply here).
   float gust = 0.8 + 0.22 * sin(uTime * 0.37 + phase * 0.31) + 0.12 * sin(uTime * 1.13 + phase * 1.7);
-  float rip = snoise(vec3(p.x / uSize.x * 2.2 - uTime * 1.1, p.y / uSize.y * 1.6, phase));
+  float rip = snoise(vec3(p.x / uSize.x * 2.2 - uTime * 1.1 * beat,p.y / uSize.y * 1.6, phase));
   // Deeper folds than the original pair wave: shallow waves read as flat boards face-on.
   z = (z * gust + rip * u * uSize.y * 0.07 * gust) * 2.2;
   // The fold pulls the free end a little toward the pole.

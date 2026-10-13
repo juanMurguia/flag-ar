@@ -17,7 +17,7 @@ export function sunDirection(elevationDeg: number, azimuthDeg: number) {
   return new THREE.Vector3(Math.sin(phi) * Math.sin(theta), Math.cos(phi), -Math.sin(phi) * Math.cos(theta));
 }
 
-function makeSky(sunDir: THREE.Vector3, exposure: number) {
+function makeSky(sunDir: THREE.Vector3, exposure: number, haze?: { horizon: THREE.Color; sunColor: THREE.Color }) {
   const sky = new Sky();
   const u = sky.material.uniforms;
   u.turbidity.value = SKY_PARAMS.turbidity;
@@ -29,13 +29,18 @@ function makeSky(sunDir: THREE.Vector3, exposure: number) {
   // capped under the bloom threshold: the Mie peak around the sun is huge and would bloom into a big disk.
   // The sun mesh, not the sky, carries the bloom and the god rays.
   u.uExposure = { value: exposure };
+  // The low sky melts into the same haze as the far cloud sea. Preetham alone is a cool grey there, and
+  // that grey band showed between the pink sky and the warm cloud horizon. Strength 0 turns the blend off.
+  u.uHorizon = { value: haze?.horizon ?? new THREE.Color() };
+  u.uSunColor = { value: haze?.sunColor ?? new THREE.Color() };
+  u.uHazeStrength = { value: haze ? 1 : 0 };
   sky.material.fragmentShader = sky.material.fragmentShader
-    .replace("uniform vec3 up;", "uniform vec3 up;\nuniform float uExposure;")
+    .replace("uniform vec3 up;", "uniform vec3 up;\nuniform float uExposure;\nuniform vec3 uHorizon;\nuniform vec3 uSunColor;\nuniform float uHazeStrength;")
     // No solar disc here: at this elevation it turns red and blooms pink. The sun mesh draws the disc.
     .replace("L0 += ( vSunE * 19000.0 * Fex ) * sundisk;", "L0 += 0.0 * sundisk;")
     // A warm tint and a wide golden glow around the sun: the Preetham model alone reads pale and cool.
     .replace("vec3 retColor =", "texColor += vec3(0.30, 0.17, 0.07) * (pow(max(cosTheta, 0.0), 8.0) * 0.012 + pow(max(cosTheta, 0.0), 120.0) * 0.12 + pow(max(cosTheta, 0.0), 30.0) * 0.05);\nvec3 retColor =")
-    .replace("gl_FragColor = vec4( retColor, 1.0 );", "vec3 skyOut = retColor * vec3(1.1, 0.92, 0.95) * uExposure;\nskyOut *= min(1.0, 2.6 / max(max(skyOut.r, skyOut.g), max(skyOut.b, 1e-4)));\ngl_FragColor = vec4( skyOut, 1.0 );");
+    .replace("gl_FragColor = vec4( retColor, 1.0 );", "vec3 skyOut = retColor * vec3(1.1, 0.92, 0.95) * uExposure;\nskyOut *= min(1.0, 2.6 / max(max(skyOut.r, skyOut.g), max(skyOut.b, 1e-4)));\nfloat hs = max(dot(direction, vSunDirection), 0.0);\nvec3 haze = uHorizon + uSunColor * (pow(hs, 6.0) * 0.55 + pow(hs, 60.0) * 1.6);\nskyOut = mix(skyOut, haze, uHazeStrength * (1.0 - smoothstep(0.0, 0.16, direction.y)));\ngl_FragColor = vec4( skyOut, 1.0 );");
   sky.material.needsUpdate = true;
   return sky;
 }
@@ -68,14 +73,16 @@ float cloudShape(vec2 q, float seed) {
   q += warp * 0.12;
   float clumps = nPuffSmall(q) * 0.5 + nPuffSmall(q * 2.3 + 0.37) * 0.22 + nPuffBig(q * 0.33 + seed) * 0.4;
   float shape = clumps + (fbm4(q * 1.7) - 0.5) * uDetail + (nPuffSmall(q * 5.1 + 0.6) - 0.5) * 0.12;
-  float mask = smoothstep(0.25, 0.65, nRegion(q * 0.045 + seed * 0.3));
-  return shape * (0.55 + 0.6 * mask);
+  // Two region scales: dense banks, broken patches, and open sky, instead of one even sheet.
+  float mask = smoothstep(0.25, 0.65, nRegion(q * 0.045 + seed * 0.3)) * smoothstep(0.15, 0.6, nRegion(NROT * q * 0.13 + 0.61));
+  return shape * (0.4 + 0.85 * mask);
 }
 
 // One cloud deck on a virtual plane. Returns (density, thickness, light).
 vec3 deck(vec3 d, vec4 P) {
   float t = P.x / max(d.y, 0.015);
-  vec2 p = cameraPosition.xz + d.xz * t + vec2(uTime * 1.5, uTime * 0.4) + P.w * 913.0;
+  // Downwind (+x), like the flags and the sea. The lower deck runs a little faster than the high one.
+  vec2 p = cameraPosition.xz + d.xz * t - vec2(uTime * 1.5, uTime * 0.2) * (1.0 + 0.15 * P.w) + P.w * 913.0;
   vec2 q = p / P.y;
   float shape = cloudShape(q, P.w);
   float dens = smoothstep(P.z, P.z + 0.06, shape);
@@ -139,7 +146,7 @@ export class SunsetSky {
   private time = { value: 0 };
 
   constructor(private look: SunsetLook, exposure = 1) {
-    this.sky = makeSky(look.sunDir, exposure);
+    this.sky = makeSky(look.sunDir, exposure, look);
     this.sky.scale.setScalar(SKY_SCALE);
     this.sky.frustumCulled = false;
     this.dome = new THREE.Mesh(

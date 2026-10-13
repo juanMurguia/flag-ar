@@ -67,16 +67,26 @@ varying vec3 vWorld;
 ${NOISE_GLSL}
 ${SHADE_GLSL}
 
-vec2 drift() { return vec2(uTime * 0.35, uTime * 0.08); }
+// Wind carries the clouds toward +x, the way the flags fly. The noise is sampled at p - drift, so the
+// pattern moves with +drift.
+vec2 drift() { return vec2(uTime * 1.2, uTime * 0.12); }
 
-// Macro shape: dome surface height in [0, 1] at world xz.
+// Macro shape: dome surface height in [0, 1] at world xz. Four texture reads: it runs several times per
+// march step, so it is the cost that matters most.
+// Variety: puffs at three scales (the big one rotated, so the texture grid does not line up) and a
+// region field that raises banks in some places and lowers them in others.
+// No domain warp and no steep valleys: the noise is 8-bit, and a warp scaled up by 100+ m turns its
+// quantization steps into terraces (contour rings), and steep walls defeat the march.
 float cloudH(vec2 p) {
-  p += drift();
-  float region = nRegion(p / 1400.0);
-  float big = nPuffBig(p / 150.0 + vec2(0.13, 0.71));
-  float small = nPuffSmall(p / 48.0 + vec2(0.41, 0.07));
-  float h = big * 0.62 + small * 0.30 * (0.6 + 0.4 * big);
-  h = clamp(h * (0.85 + 0.3 * region), 0.0, 1.0);
+  p -= drift();
+  float region = nRegion(p / 900.0);
+  // Small puffs lag the big ones a little, so the shapes change as they travel instead of sliding as one.
+  vec2 lag = drift() * 0.15;
+  float big = nPuffBig(NROT * p / 210.0 + vec2(0.13, 0.71));
+  float mid = nPuffBig(p / 95.0 + vec2(0.52, 0.29));
+  float small = nPuffSmall((p + lag) / 46.0 + vec2(0.41, 0.07));
+  float h = big * 0.5 + mid * 0.3 + small * 0.26 * (0.5 + 0.5 * max(big, mid));
+  h = clamp(h * (0.72 + 0.5 * region), 0.0, 1.0);
   return 1.0 - pow(1.0 - h, 1.6);
 }
 
@@ -88,7 +98,8 @@ float density(vec3 p, float surf, float detail) {
   float inside = (surf - p.y) / uSkin;           // 0 at the dome surface, 1 at the bottom of the skin
   if (inside <= 0.0) return 0.0;
   if (inside >= 1.0 || detail < 0.5) return 1.0;
-  vec3 q = vec3(p.x + drift().x, p.y, p.z + drift().y);
+  // Billows rise slowly while they travel: the edges boil instead of holding still.
+  vec3 q = vec3(p.x - drift().x, p.y - uTime * 0.15, p.z - drift().y);
   vec4 a = texture(uBillow, q / 22.0);
   vec4 b = texture(uBillow, q / 7.0);
   float billow = a.r * 0.55 + b.g * 0.3 + b.b * 0.15;   // 0..1, high in the middle of each billow
@@ -100,7 +111,9 @@ void main() {
   vec3 ro = cameraPosition;
   vec3 rd = normalize(vWorld - ro);
   float t0 = length(vWorld - ro);
-  if (rd.y > -0.0005) { gl_FragColor = vec4(hazeColor(rd), 1.0); return; }
+  // Grazing rays at the far edge of the plane: haze only. Write far depth too: a shader that writes
+  // gl_FragDepth on one path leaves it undefined on the others, and that strip then hid the flags.
+  if (rd.y > -0.0005) { gl_FragColor = vec4(hazeColor(rd), 1.0); gl_FragDepth = 1.0; return; }
 
   vec3 L = uSunDir;
   float slope = 1.3;
@@ -110,6 +123,11 @@ void main() {
   vec3 acc = vec3(0.0);
   float T = 1.0;
   float tDepth = -1.0;
+  float tPrev = 0.0;      // last sample above the surface
+  bool hit = false;
+  // Per-pixel jitter of the step phase: fixed steps through the skin draw contour rings; jitter turns
+  // them into fine grain, which the film noise in the post pass hides.
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   for (int i = 0; i < STEPS; i++) {
     vec3 p = vWorld + rd * t;
     float dist = t0 + t;
@@ -118,8 +136,25 @@ void main() {
     float above = p.y - surf;
     if (above > 0.05) {
       // Over the domes: leap toward the surface (conservative for the dome slopes), with a minimum stride.
+      tPrev = t;
       t += max(above / (-rd.y + slope * horiz), 0.3 + dist * 0.003);
       continue;
+    }
+    if (!hit) {
+      // First time under the surface: the leap may have gone deep. Bisect back to the surface, so the
+      // skin starts where the dome is, not where the stride happened to land.
+      hit = true;
+      float a0 = tPrev, a1 = t;
+      for (int k = 0; k < 4; k++) {
+        float m = 0.5 * (a0 + a1);
+        vec3 q = vWorld + rd * m;
+        if (q.y > surfY(q.xz)) a0 = m; else a1 = m;
+      }
+      t = a1 + jitter * max(0.25, dist * 0.006) * stepScale;
+      p = vWorld + rd * t;
+      dist = t0 + t;
+      surf = surfY(p.xz);
+      if (p.y > surf) continue;
     }
     float d = density(p, surf, detail);
     float dt = max(0.25, dist * 0.006) * stepScale;

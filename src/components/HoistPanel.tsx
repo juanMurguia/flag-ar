@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import type { PairScene } from "@/lib/flag/scene";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import type { LogoImage } from "@/lib/flag/texture";
 import { ACCEPT, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
 import { CATEGORIES } from "@/lib/startups/model";
-import { Downloads, ShareButtons } from "./Share";
+import { ShareButtons } from "./Share";
 import Icon from "./Icon";
 
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
@@ -15,15 +15,25 @@ type Phase =
   | { kind: "hoisting" }
   | { kind: "done"; slug: string; order: number };
 
+/** What the sheet drives: the two-pole scene on /izar, or the Hall of Fame when hoisting in place. */
+export interface HoistStage {
+  setStartup(logo: LogoImage | null, bg: string, name?: string): void;
+  hoistTo(target: number, seconds?: number): Promise<void>;
+  setInsetRight(px: number): void;
+  setInsetBottom(px: number): void;
+}
+
 /**
- * "Izar mi bandera": side panel (bottom sheet on phones). The second pole shows a live preview while
+ * "Izar mi bandera": side panel (bottom sheet on phones). A pole shows a live preview while
  * the form fills in. No sign-in: the server limits by IP, and the magic link proves ownership later.
  */
 export default function HoistPanel({
-  scene, webgl, closing = false, onClose, onClosed,
+  scene, webgl, closing = false, onClose, onClosed, doneExtra,
 }: {
-  scene: RefObject<PairScene | null>;
+  scene: RefObject<HoistStage | null>;
   webgl: boolean | null;
+  /** Extra actions under the share buttons once the flag is up (downloads on /izar). */
+  doneExtra?: (slug: string) => ReactNode;
   closing?: boolean;
   /** `instant` skips the exit animation (keyboard close). */
   onClose: (instant?: boolean) => void;
@@ -194,7 +204,7 @@ export default function HoistPanel({
           </p>
           <p className="muted small">Ya se ve en tu link. Aparece en el Salón de la Fama cuando la aprobemos.</p>
           <ShareButtons name={name.trim()} order={phase.order} url={`${SITE}/${phase.slug}`} />
-          {webgl && <Downloads scene={scene} slug={phase.slug} />}
+          {doneExtra?.(phase.slug)}
         </div>
       ) : (
         <>

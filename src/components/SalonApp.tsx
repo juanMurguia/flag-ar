@@ -1,15 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import type { SalonScene } from "@/lib/flag/salon";
+import { usePathname, useRouter } from "next/navigation";
+import HoistPanel from "./HoistPanel";
+import type { SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, categoryLabel, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { xIntent } from "./Share";
 import Icon from "./Icon";
 
 const POLL_MS = 30_000;
+const FX_KEY = "flagar-hq";
+
+// One switch for visitors: they know "looks better" vs "runs smoother", not AO or bloom.
+// God rays stay off in both: they wash the sunset out.
+const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: false, hd: true };
+const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
+
+function savedHigh(): boolean | null {
+  try {
+    const v = localStorage.getItem(FX_KEY);
+    return v === null ? null : v === "1";
+  } catch {
+    return null;
+  }
+}
 
 function normalize(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -22,11 +38,75 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   const [all, setAll] = useState(initial);
   const [view, setView] = useState<"3d" | "grid" | null>(null);
   const [query, setQuery] = useState("");
+  // High quality: null until the scene picks its device default. A saved choice wins over the default.
+  const [high, setHigh] = useState<boolean | null>(null);
+  const highRef = useRef(high); // latest value, so fast repeated clicks never toggle from a stale state
+  highRef.current = high;
   const [picked, setPicked] = useState<PublicStartup | null>(null);
   // The card keeps showing the last flag while it animates out after `picked` clears.
   const [shown, setShown] = useState<PublicStartup | null>(null);
   if (picked && picked !== shown) setShown(picked);
   const router = useRouter();
+
+  // Hoisting happens here, in the hall: the camera flies to an empty pole and the sheet slides in beside it.
+  // The URL becomes /izar (a real page on reload), so Back closes the sheet. "closing" keeps it mounted
+  // while it slides out.
+  const pathname = usePathname();
+  const [hoist, setHoist] = useState<"open" | "closing" | "closed">("closed");
+  const hoistSlot = useRef<number | undefined>(undefined);
+  const instantClose = useRef(false);
+  const openHoist = useCallback((slot?: number) => {
+    const s = scene.current;
+    if (!s) {
+      router.push("/izar"); // no 3D (or not ready yet): the standalone page
+      return;
+    }
+    hoistSlot.current = slot;
+    setPicked(null);
+    if (location.pathname === "/izar") s.claimSlot(slot); // already open: another empty pole takes the flag
+    else history.pushState(null, "", "/izar");
+  }, [router]);
+  const openRef = useRef(openHoist);
+  openRef.current = openHoist;
+  // Keyboard closes (Escape) skip the exit animation: they repeat often and must feel instant.
+  const closeHoist = useCallback((instant?: boolean) => {
+    instantClose.current = !!instant;
+    history.back();
+  }, []);
+  const hoistClosed = useCallback(() => setHoist((h) => (h === "closing" ? "closed" : h)), []);
+
+  // The URL drives the sheet, so Back and Forward work like a page change.
+  useEffect(() => {
+    const s = scene.current;
+    if (pathname === "/izar") {
+      if (!s) return;
+      if (hoist !== "open") {
+        s.claimSlot(hoistSlot.current);
+        setHoist("open");
+      }
+    } else if (hoist === "open") {
+      s?.release(); // the world glides back while the sheet slides out
+      setHoist(instantClose.current ? "closed" : "closing");
+      instantClose.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  useEffect(() => {
+    if (hoist !== "open") return;
+    const title = document.title;
+    document.title = "Izá tu bandera · flag.ar";
+    return () => {
+      document.title = title;
+    };
+  }, [hoist]);
+
+  // Plain clicks open the sheet in place. Modified clicks (new tab) and the no-3D list follow the link.
+  function onHoistLink(e: React.MouseEvent) {
+    if (!scene.current || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    openHoist();
+  }
 
   // Fallback: unmount the closing card even if animationend never fires.
   useEffect(() => {
@@ -87,10 +167,13 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     let cancelled = false;
     import("@/lib/flag/salon").then((mod) => {
       if (cancelled || !holder.current) return;
+      const startHigh = savedHigh() ?? mod.defaultFx().ao;
       s = new mod.SalonScene(holder.current, {
         onSelect: (i) => setPicked(i === null ? null : listRef.current[i] ?? null),
-        onPlaceholder: () => router.push("/izar"),
-      });
+        onPlaceholder: (slot) => openRef.current(slot),
+        onFx: () => setHigh(false), // auto drop on a slow GPU: shown, not saved
+      }, startHigh ? FX_HIGH : FX_LOW);
+      setHigh(startHigh);
       s.setStartups(listRef.current);
       scene.current = s;
     });
@@ -133,6 +216,17 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchKey, view]);
 
+  function toggleQuality() {
+    if (highRef.current === null) return;
+    const next = !highRef.current;
+    highRef.current = next;
+    setHigh(next);
+    scene.current?.setFx(next ? FX_HIGH : FX_LOW);
+    try {
+      localStorage.setItem(FX_KEY, next ? "1" : "0");
+    } catch {}
+  }
+
   async function wallpaper() {
     const s = scene.current;
     if (!s) return;
@@ -145,9 +239,10 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   );
 
   return (
-    <main className={`salon${view === "grid" ? " grid-mode" : ""}`}>
+    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}`}>
       {view === "3d" && <div ref={holder} className="salon-holder" />}
 
+      {/* One row: count, search, hoist. Every control is 28 px on a 4 px rhythm. */}
       <header className="salon-bar">
         <h1 className="salon-count" aria-live="polite">
           <strong>{all.length.toLocaleString("es-AR")}</strong> startups
@@ -159,16 +254,32 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
             aria-label="Buscar startup"
           />
         </label>
-        <Link href="/izar" className="bare-btn" aria-label="Izá tu bandera" title="Izá tu bandera">
-          <Icon name="plus" size={15} />
-        </Link>
+
+        {/* Empty hall: the hoist button grows into the invitation, so the row stays one line. */}
+        {all.length === 0 && !q ? (
+          <Link href="/izar" className="bar-cta" onClick={onHoistLink} aria-expanded={hoist === "open"}>
+            <Icon name="plus" size={13} />
+            <span>Izá la primera</span>
+          </Link>
+        ) : (
+          <Link
+            href="/izar" className="bar-btn" aria-label="Izá tu bandera" title="Izá tu bandera" onClick={onHoistLink}
+            aria-expanded={hoist === "open"}
+          >
+            <Icon name="plus" size={14} />
+          </Link>
+        )}
       </header>
 
-      {/* Empty hall: one quiet invitation instead of a field of ads. */}
-      {all.length === 0 && !q && (
-        <div className="salon-empty" role="status">
-          <p>Todavía no flamea ninguna. Sé la primera startup en izar su bandera.</p>
-          <Link href="/izar" className="btn primary">Izar bandera</Link>
+      {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
+      {high !== null && (
+        <div className="salon-corner">
+          <button
+            type="button" className="bar-btn hd-btn" aria-pressed={high} onClick={toggleQuality}
+            aria-label="Calidad HD" title={high ? "HD activado" : "HD apagado: más fluido"}
+          >
+            HD
+          </button>
         </div>
       )}
 
@@ -205,6 +316,10 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
             </div>
           </div>
         </aside>
+      )}
+
+      {view === "3d" && hoist !== "closed" && (
+        <HoistPanel scene={scene} webgl closing={hoist === "closing"} onClose={closeHoist} onClosed={hoistClosed} />
       )}
 
       {view === "grid" && (

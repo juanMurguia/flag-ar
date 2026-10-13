@@ -48,34 +48,38 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
 
       <div className="dock open" ref={dock}>
         <section className="startup" aria-labelledby="startup-name">
-          <p className="startup-trail">
-            <span>Bandera #{startup.order}</span>
-            {categoryLabel(startup.category) && <span>· {categoryLabel(startup.category)}</span>}
-            {startup.status === "pending" && <span className="pill">En revisión para el salón</span>}
-          </p>
-          <h1 id="startup-name" className="startup-name">{startup.name}</h1>
-          <div className="startup-links">
-            <a className="startup-cta" href={startup.link} target="_blank" rel="noopener noreferrer nofollow">
-              {startup.domain.startsWith("x.com/") ? `@${startup.domain.slice(6)}` : startup.domain}
-            </a>
+          <div className="startup-id">
+            <p className="startup-trail">
+              <span>Bandera #{startup.order}</span>
+              {categoryLabel(startup.category) && <span>· {categoryLabel(startup.category)}</span>}
+              {startup.status === "pending" && <span className="pill">En revisión para el salón</span>}
+            </p>
+            <h1 id="startup-name" className="startup-name">{startup.name}</h1>
+            <div className="startup-links">
+              <a className="startup-cta" href={startup.link} target="_blank" rel="noopener noreferrer nofollow">
+                {startup.domain.startsWith("x.com/") ? `@${startup.domain.slice(6)}` : startup.domain}
+              </a>
+            </div>
           </div>
-          <ShareButtons name={startup.name} order={startup.order} url={url} />
-          <p className="startup-actions">
-            {webgl && (
+          <div className="startup-side">
+            <ShareButtons name={startup.name} order={startup.order} url={url} />
+            <p className="startup-actions">
+              {webgl && (
+                <button
+                  type="button" className="linklike" aria-expanded={panel === "downloads"}
+                  onClick={() => setPanel(panel === "downloads" ? "none" : "downloads")}
+                >Descargas</button>
+              )}
               <button
-                type="button" className="linklike" aria-expanded={panel === "downloads"}
-                onClick={() => setPanel(panel === "downloads" ? "none" : "downloads")}
-              >Descargas</button>
-            )}
-            <button
-              type="button" className="linklike" aria-expanded={panel === "edit"}
-              onClick={() => setPanel(panel === "edit" ? "none" : "edit")}
-            >Editar</button>
-            <button
-              type="button" className="linklike" aria-expanded={panel === "report"}
-              onClick={() => setPanel(panel === "report" ? "none" : "report")}
-            >Reportar</button>
-          </p>
+                type="button" className="linklike" aria-expanded={panel === "edit"}
+                onClick={() => setPanel(panel === "edit" ? "none" : "edit")}
+              >Editar</button>
+              <button
+                type="button" className="linklike" aria-expanded={panel === "report"}
+                onClick={() => setPanel(panel === "report" ? "none" : "report")}
+              >Reportar</button>
+            </p>
+          </div>
           {panel !== "none" && (
             <div className="reveal" key={panel}>
               {panel === "downloads" && <Downloads scene={scene} slug={startup.slug} />}

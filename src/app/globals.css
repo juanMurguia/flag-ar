@@ -57,12 +57,12 @@ h1, h2 { text-wrap: balance; }
 }
 
 /* Glass surfaces. Thinner glass lets more of the scene through, so small text gets a darker grey. */
-.toolbar, .corner-link, .back, .startup, .salon-bar, .results, .salon-card, .empty-search, .salon-empty, .panel-form {
+.toolbar, .corner-link, .back, .startup, .salon-bar, .salon-corner, .results, .salon-card, .empty-search, .panel-form {
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-sm);
 }
-.toolbar, .startup, .sheet, .salon-bar, .results, .salon-card, .empty-search, .salon-empty, .panel-form { --muted: #3d3d3d; }
+.toolbar, .startup, .sheet, .salon-bar, .salon-corner, .results, .salon-card, .empty-search, .panel-form { --muted: #3d3d3d; }
 
 /* ---------- Pressables ---------- */
 
@@ -179,8 +179,10 @@ h1, h2 { text-wrap: balance; }
 .corner-link.right { left: auto; right: 16px; }
 
 /* Startup details: a small glass card. It materializes after the flag starts to rise, then its lines stagger in. */
+/* Wide and short: identity on the left, share and actions on the right. Panels span both columns. */
 .startup {
-  width: min(360px, 100%); display: grid; gap: 4px; padding: 14px 16px; border-radius: var(--radius-lg);
+  width: min(600px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  gap: 4px 24px; padding: 14px 18px; border-radius: var(--radius-lg);
   color: var(--ink);
   animation: rise 420ms var(--ease-out) 600ms both;
 }
@@ -203,11 +205,12 @@ h1, h2 { text-wrap: balance; }
 .startup-links { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
 .startup-cta { color: var(--muted); font-size: 12px; text-decoration: none; transition: color var(--quick) ease; }
 @media (hover: hover) and (pointer: fine) { .startup-cta:hover { color: var(--ink); } }
-.startup .share { margin-top: 6px; }
+.startup-id { display: grid; gap: 4px; min-width: 0; }
+.startup-side { display: grid; gap: 6px; justify-items: end; }
 .startup-actions { display: flex; gap: 12px; margin: 0; }
 
 /* Panels inside the card (Descargas, Editar, Reportar) open in place with a short reveal. */
-.reveal { animation: rise-sm 240ms var(--ease-out) both; padding-top: 6px; }
+.reveal { grid-column: 1 / -1; animation: rise-sm 240ms var(--ease-out) both; padding-top: 6px; }
 
 .pill {
   display: inline-block; padding: 1px 8px; border-radius: 999px;
@@ -348,41 +351,81 @@ h1, h2 { text-wrap: balance; }
 
 .salon { position: fixed; inset: 0; overflow: hidden; color: var(--ink); }
 .salon.grid-mode { position: static; min-height: 100%; overflow: visible; background: #fff; }
-.salon-holder { position: absolute; inset: 0; animation: fade 700ms ease both; }
+/* The canvas fades itself in after its first real frames (see SalonScene). */
+.salon-holder { position: absolute; inset: 0; }
 
+/* Hall bar: one row, 36 px tall. Every control is 28 px, 4 px apart, 4 px from the edge.
+   A thin rule splits count+search from quality+hoist. */
 .salon-bar {
   position: relative; z-index: 2; display: flex; flex-wrap: nowrap; align-items: center; gap: 4px;
   width: fit-content; max-width: calc(100% - 24px); margin: max(12px, env(safe-area-inset-top)) auto 0;
-  padding: 3px 3px 3px 12px; border-radius: 999px;
+  padding: 4px; border-radius: 999px;
   animation: drop-in 420ms var(--ease-out) 120ms both;
 }
 .salon.grid-mode .salon-bar { background: #fff; box-shadow: 0 0 0 1px #d0d0d0; }
+/* Flex box with line-height 1: the text centers on the same axis as the 28 px controls. */
 .salon-count {
-  margin: 0 6px 0 0; font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap;
+  display: flex; align-items: center; gap: 4px; height: 28px; margin: 0; padding: 0 6px 0 8px;
+  font-size: 12px; font-weight: 400; line-height: 1; color: var(--muted); white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.salon-count strong { font-size: 12px; font-weight: 600; color: var(--ink); }
+.salon-count strong { font-weight: 600; color: var(--ink); }
 .search {
-  display: flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 10px; border-radius: 999px;
-  background: rgba(0, 0, 0, 0.06); color: var(--muted);
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06); color: var(--muted); cursor: text;
   transition: background-color var(--quick) ease, box-shadow var(--quick) ease;
 }
 .search:focus-within { background: rgba(255, 255, 255, 0.8); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .search input {
-  border: 0; background: transparent; font: inherit; font-size: 12px; width: 110px; color: var(--ink); outline: none;
-  transition: width 240ms var(--ease-out);
+  border: 0; padding: 0; background: transparent; font: inherit; font-size: 12px; line-height: 1; width: 110px;
+  color: var(--ink); outline: none; transition: width 240ms var(--ease-out);
 }
 .search input:focus { width: 150px; }
 .search input::placeholder { color: var(--muted); opacity: 1; }
 .search input::-webkit-search-cancel-button { cursor: pointer; }
+
+.bar-sep { flex: none; width: 1px; height: 14px; margin: 0 2px; background: rgba(0, 0, 0, 0.12); }
+.bar-btn {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink); cursor: pointer; text-decoration: none;
+  transition: background-color var(--quick) ease, color var(--quick) ease, opacity var(--quick) ease;
+}
+.bar-btn:active { background: rgba(0, 0, 0, 0.1); }
+.bar-cta {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 12px 0 9px;
+  border-radius: 999px; background: #111; color: #fff; font-size: 12px; font-weight: 500; line-height: 1;
+  white-space: nowrap; text-decoration: none; transition: background-color var(--quick) ease;
+}
+.bar-cta:active { background: #333; }
+@media (hover: hover) and (pointer: fine) {
+  .bar-btn:hover { background: rgba(0, 0, 0, 0.06); }
+  .bar-cta:hover { background: #2a2a2a; }
+}
+
+/* Quality pill, top right. Same height and top edge as the bar, so both read as one row on the screen.
+   "HD" in type, not an icon: on reads as ink on a soft chip, off fades to a ghost. aria-pressed carries the state. */
+.salon-corner {
+  position: absolute; z-index: 2; top: max(12px, env(safe-area-inset-top)); right: 12px;
+  padding: 4px; border-radius: 999px;
+  animation: drop-in 420ms var(--ease-out) 180ms both;
+}
+.hd-btn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+.hd-btn[aria-pressed="false"] { color: var(--muted); opacity: 0.5; }
+.hd-btn[aria-pressed="true"] { background: rgba(0, 0, 0, 0.08); }
+.salon.hoisting .salon-corner { display: none; }
+
+/* Phones: the bar spans the width, search takes the slack, the hoist label folds to its icon. */
 @media (max-width: 640px) {
-  .search { flex: 1 1 auto; }
-  .search input, .search input:focus { width: 100%; min-width: 60px; }
+  .salon-bar { width: calc(100% - 68px); margin-left: 12px; }
+  .search { flex: 1 1 auto; min-width: 0; }
+  .search input, .search input:focus { width: 100%; min-width: 40px; }
+  .bar-cta span { display: none; }
+  .bar-cta { width: 28px; padding: 0; justify-content: center; }
 }
 
 /* Results drop from the search bar, so they scale from the top. */
 .results {
-  position: absolute; z-index: 2; top: 60px; left: 50%; translate: -50% 0;
+  position: absolute; z-index: 2; top: 56px; left: 50%; translate: -50% 0;
   display: grid; gap: 0; margin: 0; padding: 4px; list-style: none; border-radius: var(--radius-lg);
   transform-origin: top center;
   animation: pop-down 200ms var(--ease-out) both;
@@ -399,19 +442,6 @@ h1, h2 { text-wrap: balance; }
   animation: pop-down 200ms var(--ease-out) both;
 }
 .empty-search p { margin: 0; }
-
-/* Empty hall: one quiet invitation under the bar. Arrives after the bar, so the scene shows first. */
-.salon-empty {
-  position: relative; z-index: 2; margin: 10px auto 0; width: fit-content; max-width: calc(100% - 32px);
-  display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; border-radius: 999px;
-  font-size: 12px; color: var(--muted); transform-origin: top center;
-  animation: pop-down 320ms var(--ease-out) 600ms both;
-}
-.salon-empty p { margin: 0; }
-.salon-empty .btn { min-height: 28px; padding: 4px 12px; font-size: 12px; }
-@media (max-width: 640px) {
-  .salon-empty { flex-direction: column; align-items: stretch; text-align: center; padding: 12px; border-radius: var(--radius-lg); gap: 10px; }
-}
 
 /* Flag card: rises from the corner it lives in, and leaves the same way. */
 .salon-card {
@@ -430,6 +460,22 @@ h1, h2 { text-wrap: balance; }
 @media (max-width: 640px) {
   .salon-card { left: 16px; right: 16px; width: auto; transform-origin: bottom center; }
 }
+
+/* Hoisting in the hall: the sheet takes the right side, and the bar slides to the middle of what is left,
+   in step with the 3D view (same drawer curve as the sheet). Phones use a bottom sheet: the bar stays. */
+.salon-bar { transition: translate 340ms var(--ease-drawer); }
+.salon.hoisting :is(.results, .empty-search) { display: none; }
+@media (min-width: 768px) {
+  .salon.hoisting .salon-bar { translate: -176px 0; }
+}
+
+/* ---------- Page changes ----------
+   The old page dissolves into the dusk backdrop and the new one comes out of it. The new 3D canvas then
+   fades in on its own once its first frames are ready, so no scene ever pops in. */
+::view-transition-old(.page) { animation: page-out 240ms var(--ease-out) both; }
+::view-transition-new(.page) { animation: page-in 420ms var(--ease-out) 60ms both; }
+@keyframes page-out { to { opacity: 0; filter: blur(4px); } }
+@keyframes page-in { from { opacity: 0; filter: blur(4px); } }
 
 /* No-WebGL list */
 .salon-grid { padding: 20px 16px 80px; }
@@ -518,6 +564,8 @@ h1, h2 { text-wrap: balance; }
 /* ---------- Small and short screens ---------- */
 
 @media (max-width: 480px) {
+  .startup { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .startup-side { justify-items: start; }
   .startup-name { font-size: 16px; }
   .startup-trail .trail-date { display: none; }
   .share { gap: 10px; }
@@ -556,7 +604,39 @@ h1, h2 { text-wrap: balance; }
 /* ---------- Accessibility preferences ---------- */
 
 /* Reduced motion keeps the feedback but drops the travel: every entrance becomes a short cross-fade. */
+/* ---------- Icon motion ----------
+   Each icon plays one short move when its control is hovered (real pointer) or focused by keyboard.
+   Pure CSS on Lucide's SVG: no JS runtime. A press scales the icon down so taps feel physical too. */
+
+.ico { display: block; flex: none; transform-box: fill-box; transform-origin: center; transition: scale 120ms var(--ease-out); }
+:is(a, button):active:not(:disabled) .ico { scale: 0.88; }
+
+@media (hover: hover) and (pointer: fine) {
+  :is(a, button, label):hover .ico-play { animation: ico-nudge-x 420ms var(--ease-out); }
+  :is(a, button):hover .ico-pause { animation: ico-squeeze 380ms var(--ease-out); }
+  :is(a, button):hover .ico-camera { animation: ico-shutter 420ms var(--ease-out); }
+  :is(a, button):hover .ico-plus, :is(a, button):hover .ico-close { animation: ico-turn 360ms var(--ease-out); }
+  :is(a, button, label):hover .ico-search { animation: ico-tilt 480ms var(--ease-out); }
+  :is(a, button):hover .ico-hall { animation: ico-hop 520ms var(--ease-out); }
+  :is(a, button):hover .ico-download { animation: ico-drop 480ms var(--ease-out); }
+  :is(a, button):hover .ico-video { animation: ico-nudge-x 420ms var(--ease-out); }
+  label:hover .ico-frames { animation: ico-roll 520ms var(--ease-out); }
+}
+:is(a, button):focus-visible .ico { animation: ico-pulse 360ms var(--ease-out); }
+
+@keyframes ico-nudge-x { 40% { translate: 2px 0; } }
+@keyframes ico-squeeze { 40% { scale: 0.8 1.1; } }
+@keyframes ico-shutter { 30% { scale: 0.85; } 60% { scale: 1.08; } }
+@keyframes ico-turn { from { rotate: 0deg; } to { rotate: 90deg; } }
+@keyframes ico-tilt { 30% { rotate: -14deg; } 65% { rotate: 8deg; } }
+@keyframes ico-hop { 35% { translate: 0 -3px; rotate: -8deg; } 70% { translate: 0 0; rotate: 4deg; } }
+@keyframes ico-drop { 40% { translate: 0 2.5px; } 70% { translate: 0 -1px; } }
+@keyframes ico-roll { 50% { translate: 2px 0; } }
+@keyframes ico-pulse { 50% { scale: 1.12; } }
+
 @media (prefers-reduced-motion: reduce) {
+  .ico, :is(a, button, label) .ico { animation: none !important; transition: none; }
+  :is(a, button):active:not(:disabled) .ico { scale: 1; }
   @keyframes rise { from { opacity: 0; } }
   @keyframes rise-sm { from { opacity: 0; } }
   @keyframes drop-in { from { opacity: 0; } }
@@ -572,6 +652,9 @@ h1, h2 { text-wrap: balance; }
   @keyframes card-in { from { opacity: 0; } }
   @keyframes card-out { to { opacity: 0; } }
   @keyframes shake { from { opacity: 0.4; } }
+  @keyframes page-out { to { opacity: 0; } }
+  @keyframes page-in { from { opacity: 0; } }
+  .salon-bar { transition: none; }
   .startup, .startup > *, .sheet form > *, .done > *, .cards > li { animation-delay: 0ms !important; }
   .drop.over { transform: none; }
   .spinner { animation-duration: 1.2s; }
@@ -590,7 +673,7 @@ h1, h2 { text-wrap: balance; }
 /* More contrast: solid surfaces with a defined edge. */
 @media (prefers-contrast: more) {
   :root { --glass: #fff; --muted: #262626; --field-line: #333; }
-  .toolbar, .corner-link, .back, .startup, .sheet, .salon-bar, .results, .salon-card, .empty-search, .salon-empty, .panel-form {
+  .toolbar, .corner-link, .back, .startup, .sheet, .salon-bar, .salon-corner, .results, .salon-card, .empty-search, .panel-form {
     background: #fff; border: 1px solid #111;
   }
 }

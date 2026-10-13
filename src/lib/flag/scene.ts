@@ -134,6 +134,9 @@ export class PairScene {
     canvas.style.display = "block";
     canvas.style.width = "100%";
     canvas.style.height = "100%";
+    // Fades in once real frames are on screen: the first ones compile shaders and can stall.
+    canvas.style.opacity = "0";
+    canvas.style.transition = "opacity 600ms ease";
     container.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 2000);
@@ -488,7 +491,9 @@ export class PairScene {
     this.placeCamera(w, h, this.freeArea(w, h), this.yaw, this.pitch, this.zoom);
     this.handheld(now / 1000);
     this.renderFrame();
+    if (++this.frames === 3) this.renderer.domElement.style.opacity = "1";
   };
+  private frames = 0;
 
   /**
    * Live view only: a slow drift of a few pixels, like a camera held by hand. Exports skip it (the

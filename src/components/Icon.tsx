@@ -1,105 +1,25 @@
-// Inline SVG icons (24 × 24, stroke style). No icon font, no emoji: nothing extra to load, and CSP stays strict.
+// Lucide icons (ISC). Each import is one small inline SVG: no icon font, no runtime, and CSP stays strict.
+// Motion lives in globals.css ("Icon motion"): each icon plays a short CSS animation when its button is hovered or focused.
+import {
+  Camera, Download, Film, Pause, Play, Plus, Search, Trophy, Video, X, type LucideIcon,
+} from "lucide-react";
 
-const PATHS = {
-  play: <path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none" />,
-  pause: (
-    <>
-      <rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none" />
-      <rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none" />
-    </>
-  ),
-  reset: (
-    <>
-      <path d="M3 12a9 9 0 1 0 3-6.7" />
-      <path d="M3 3v5h5" />
-    </>
-  ),
-  camera: (
-    <>
-      <path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
-      <circle cx="12" cy="13.5" r="3.5" />
-    </>
-  ),
-  plus: <path d="M12 5v14M5 12h14" />,
-  back: <path d="M19 12H5M11 6l-6 6 6 6" />,
-  arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
-  close: <path d="M6 6l12 12M18 6L6 18" />,
-  external: (
-    <>
-      <path d="M14 4h6v6" />
-      <path d="M20 4l-9 9" />
-      <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
-    </>
-  ),
-  focus: (
-    <>
-      <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-  grid: (
-    <>
-      <rect x="4" y="4" width="6" height="6" rx="1" />
-      <rect x="14" y="4" width="6" height="6" rx="1" />
-      <rect x="4" y="14" width="6" height="6" rx="1" />
-      <rect x="14" y="14" width="6" height="6" rx="1" />
-    </>
-  ),
-  wind: (
-    <>
-      <path d="M3 8h10a3 3 0 1 0-3-3" />
-      <path d="M3 12h15a3 3 0 1 1-3 3" />
-      <path d="M3 16h7" />
-    </>
-  ),
-  download: (
-    <>
-      <path d="M12 4v11M7 10l5 5 5-5" />
-      <path d="M5 20h14" />
-    </>
-  ),
-  video: (
-    <>
-      <rect x="3" y="6" width="13" height="12" rx="2" />
-      <path d="M16 10l5-3v10l-5-3z" />
-    </>
-  ),
-  search: (
-    <>
-      <circle cx="11" cy="11" r="6.5" />
-      <path d="M20 20l-4.2-4.2" />
-    </>
-  ),
-  hall: (
-    <>
-      <path d="M5 21V4M12 21V3M19 21V4" />
-      <path d="M5 4h5v4H5zM12 3h6v4h-6zM19 4h0" />
-      <path d="M3 21h18" />
-    </>
-  ),
-  flag: (
-    <>
-      <path d="M5 21V4" />
-      <path d="M5 4h11l-2 4 2 4H5" />
-    </>
-  ),
-  frames: (
-    <>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="M7 5v14M17 5v14" />
-    </>
-  ),
-};
+const ICONS = {
+  play: Play,
+  pause: Pause,
+  camera: Camera,
+  plus: Plus,
+  close: X,
+  search: Search,
+  hall: Trophy,
+  download: Download,
+  video: Video,
+  frames: Film,
+} satisfies Record<string, LucideIcon>;
 
-export type IconName = keyof typeof PATHS;
+export type IconName = keyof typeof ICONS;
 
 export default function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
-  return (
-    <svg
-      width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"
-    >
-      {PATHS[name]}
-    </svg>
-  );
+  const Glyph = ICONS[name];
+  return <Glyph className={`ico ico-${name}`} size={size} strokeWidth={2} aria-hidden="true" focusable="false" />;
 }

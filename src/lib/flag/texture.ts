@@ -1,5 +1,5 @@
 // Canvas drawing for the flags: the Argentine flag (official colors, Sun of May), the startup flag
-// (logo centered on a color), the hem, and the fabric weave.
+// (logo centered on a color), and the fabric weave.
 import { dominantColor, defaultBackground } from "@/lib/startups/model";
 import { removeSolidBackground, visibleBounds } from "./startup";
 
@@ -56,7 +56,6 @@ export function drawArgentineFlag(canvas: HTMLCanvasElement, weave?: HTMLCanvasE
     ctx.fillRect(0, band * 2, LAYOUT_W, LAYOUT_H - band * 2);
     // Sun diameter is 5/6 of the white band.
     drawSun(ctx, LAYOUT_W / 2, LAYOUT_H / 2, band * 0.42);
-    drawHem(ctx);
   });
   applyWeave(canvas, weave);
 }
@@ -72,7 +71,6 @@ export function drawStartupFlag(canvas: HTMLCanvasElement, opts: StartupFlagOpti
   withLayout(canvas, (ctx) => {
     ctx.fillStyle = opts.bg;
     ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
-    drawHem(ctx);
   });
   const img = opts.logo;
   if (img && img.width > 0 && img.height > 0) {
@@ -198,28 +196,6 @@ function drawSun(ctx: CanvasRenderingContext2D, cx: number, cy: number, R: numbe
   ctx.moveTo(-8 * f, 20 * f);
   ctx.quadraticCurveTo(0, 26 * f, 8 * f, 20 * f);
   ctx.stroke();
-  ctx.restore();
-}
-
-function drawHem(ctx: CanvasRenderingContext2D) {
-  // Folded hem: a double layer of cloth along every edge. Darker (denser), with a soft fold line inside.
-  const hem = 16;
-  ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.07)";
-  ctx.fillRect(0, 0, LAYOUT_W, hem);
-  ctx.fillRect(0, LAYOUT_H - hem, LAYOUT_W, hem);
-  ctx.fillRect(0, hem, hem, LAYOUT_H - hem * 2);
-  ctx.fillRect(LAYOUT_W - hem, hem, hem, LAYOUT_H - hem * 2);
-  // The fold of the cloth casts a thin soft line where the hem ends.
-  ctx.strokeStyle = "rgba(0,0,0,0.12)";
-  ctx.lineWidth = 1.6;
-  ctx.strokeRect(hem + 0.8, hem + 0.8, LAYOUT_W - hem * 2 - 1.6, LAYOUT_H - hem * 2 - 1.6);
-  // Two stitch lines, as a sewing machine leaves them.
-  ctx.setLineDash([5, 3.5]);
-  ctx.strokeStyle = "rgba(40,40,60,0.22)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(hem * 0.35, hem * 0.35, LAYOUT_W - hem * 0.7, LAYOUT_H - hem * 0.7);
-  ctx.strokeRect(hem * 0.75, hem * 0.75, LAYOUT_W - hem * 1.5, LAYOUT_H - hem * 1.5);
   ctx.restore();
 }
 

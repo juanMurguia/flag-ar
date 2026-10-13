@@ -14,7 +14,8 @@ import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
 import { CLOUD_BOTTOM, CLOUD_TOP, CloudSea } from "./cloudSea";
 import { applyBacklight, weaveNormalMap, type BacklightUniforms } from "./fabric";
-import { Post } from "./post";
+import { poleMaterials } from "./pole";
+import { Post, type PostFx } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
 import { createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
 import { applyWave, flagGeometry, waveUniforms, type WaveUniforms } from "./wave";
@@ -63,15 +64,34 @@ const EASE_HOVER = 7; // 1/s
 
 type Tier = "high" | "low";
 const TIERS = {
-  high: { steps: 72, dpr: 2, cloth: [32, 20] as const, near: 24, lodRange: 300, godRays: false },
-  low: { steps: 28, dpr: 1.5, cloth: [16, 10] as const, near: 10, lodRange: 150, godRays: false },
+  high: { steps: 72, cloth: [32, 20] as const, near: 24, lodRange: 300 },
+  low: { steps: 28, cloth: [16, 10] as const, near: 10, lodRange: 150 },
 };
+
+/** Visitor-facing effects. `hd` renders at up to 2x device pixels; off renders at 1x. */
+export interface SalonFx extends PostFx {
+  hd: boolean;
+}
+
+function startTier(): Tier {
+  const coarse = window.matchMedia?.("(pointer: coarse)").matches;
+  const small = window.matchMedia?.("(max-width: 767px)").matches;
+  return coarse || small ? "low" : "high";
+}
+
+/** Default effects for this device: everything but god rays on desktops, only bloom on phones. */
+export function defaultFx(): SalonFx {
+  const high = startTier() === "high";
+  return { ao: high, bloom: true, godRays: false, hd: high };
+}
 
 export interface SalonEvents {
   /** A startup was picked (after the camera arrives), or the selection was cleared (null). */
   onSelect?: (index: number | null) => void;
-  /** An empty "tu startup acá" flag was clicked. */
-  onPlaceholder?: () => void;
+  /** An empty "tu startup acá" flag was clicked. `slot` is its grid slot, for `claimSlot`. */
+  onPlaceholder?: (slot: number) => void;
+  /** The scene switched effects off on its own (slow GPU). The UI mirrors the new state. */
+  onFx?: (fx: SalonFx) => void;
 }
 
 interface Slot {
@@ -120,6 +140,19 @@ interface NearFlag {
   painted: "none" | "color" | "logo";
 }
 
+/** The visitor's own flag on an empty pole, while the hoist sheet is open (and after, until the layout changes). */
+interface Claim {
+  slot: number;
+  flag: NearFlag;
+  hoist: number; // 1 at the top of the pole, 0 down in the clouds
+  from: number;
+  target: number;
+  start: number;
+  dur: number;
+  done: (() => void) | null;
+  released: boolean; // the sheet closed: drop the flag once it is down
+}
+
 export class SalonScene {
   private renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
@@ -128,6 +161,7 @@ export class SalonScene {
   clouds: CloudSea;
   post: Post;
   private tier: Tier;
+  private fx: SalonFx;
   private sunDir: THREE.Vector3;
   private sunColor = new THREE.Color(1.0, 0.8, 0.64);
   private list: PublicStartup[] = [];
@@ -164,6 +198,12 @@ export class SalonScene {
   private knownIds: Set<string> | null = null;
   private rising = new Map<number, number>(); // slot -> start time
   private highlight = new Set<number>();
+  private claim: Claim | null = null;
+  private beforeClaim: { pos: THREE.Vector3; yaw: number; pitch: number } | null = null;
+  // Screen pixels covered by the hoist sheet. The view shifts so the claimed flag sits in the free part.
+  private inset = { right: 0, bottom: 0, goalRight: 0, goalBottom: 0 };
+  private size = { w: 1, h: 1 };
+  private frames = 0; // the canvas fades in after the first frames, so shader compiles never show
 
   // Camera
   private pos = START.clone();
@@ -187,14 +227,13 @@ export class SalonScene {
   private fpsTime = 0;
   private fpsChecks = 0;
 
-  constructor(private container: HTMLElement, private events: SalonEvents = {}) {
-    const coarse = window.matchMedia?.("(pointer: coarse)").matches;
-    const small = window.matchMedia?.("(max-width: 767px)").matches;
-    this.tier = coarse || small ? "low" : "high";
+  constructor(private container: HTMLElement, private events: SalonEvents = {}, fx: SalonFx = defaultFx()) {
+    this.tier = startTier();
+    this.fx = { ...fx };
     const t = TIERS[this.tier];
 
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance", stencil: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, t.dpr));
+    renderer.setPixelRatio(this.dpr());
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     this.renderer = renderer;
@@ -202,7 +241,9 @@ export class SalonScene {
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "application");
     canvas.setAttribute("aria-label", "Salón de la Fama en 3D. Arrastrá para mirar, rueda para avanzar por el pasillo, click en una bandera para ver su ficha.");
-    Object.assign(canvas.style, { display: "block", width: "100%", height: "100%", touchAction: "none", cursor: "grab" });
+    Object.assign(canvas.style, {
+      display: "block", width: "100%", height: "100%", touchAction: "none", cursor: "grab", opacity: "0", transition: "opacity 700ms ease",
+    });
     container.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 40000);
@@ -214,14 +255,15 @@ export class SalonScene {
     this.sky = new SunsetSky({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON }, 1);
     this.scene.add(this.sky.group);
     this.scene.environment = this.sky.environment(renderer);
-    this.scene.environmentIntensity = 0.55; // low fill, so the sun shapes the folds
+    // Bright sky fill: the glowing horizon faces the flags, so their shaded flanks stay light, not near black.
+    this.scene.environmentIntensity = 1.1;
     this.clouds = new CloudSea({ sunDir: this.sunDir, sunColor: this.sunColor, horizon: HORIZON, fogDensity: FOG_DENSITY }, t.steps);
     this.scene.add(this.clouds.group);
 
-    const sun = new THREE.DirectionalLight(0xffdcc4, 3);
+    const sun = new THREE.DirectionalLight(0xffdcc4, 1.7);
     sun.position.copy(this.sunDir).multiplyScalar(100);
     this.scene.add(sun);
-    this.scene.add(new THREE.HemisphereLight(0xdcd6ea, 0xf0cdb8, 0.25));
+    this.scene.add(new THREE.HemisphereLight(0xdcd6ea, 0xf0cdb8, 0.75));
 
     const bl = (): BacklightUniforms => ({
       uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: 1.6 }, uGlow: { value: 0 },
@@ -238,7 +280,7 @@ export class SalonScene {
     this.drawPlaceholderTile();
     this.farMaterial = this.atlasMaterial();
 
-    this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, { godRays: t.godRays });
+    this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx);
 
     this.resize();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -270,13 +312,14 @@ export class SalonScene {
     const count = cols * 2 * rows;
     this.slots = gridSlots(cols, rows);
 
-    const metal = new THREE.MeshStandardMaterial({ color: 0xd9dce2, metalness: 1, roughness: 0.3 });
-    const shaftGeo = new THREE.CylinderGeometry(0.055, 0.075, POLE_H + POLE_DEPTH, 8, 1, true);
+    // Brushed, weathered aluminium (shared with the pair page), not chrome: at this distance a mirror finish reads as CG.
+    const { metal } = poleMaterials();
+    const shaftGeo = new THREE.CylinderGeometry(0.055, 0.075, POLE_H + POLE_DEPTH, 12, 1, true);
     shaftGeo.translate(0, (POLE_H - POLE_DEPTH) / 2, 0);
     this.shafts = new THREE.InstancedMesh(shaftGeo, metal, count);
     const finialGeo = new THREE.SphereGeometry(0.12, 10, 6);
     finialGeo.translate(0, POLE_H + 0.1, 0);
-    this.finials = new THREE.InstancedMesh(finialGeo, metal.clone(), count);
+    this.finials = new THREE.InstancedMesh(finialGeo, new THREE.MeshStandardMaterial({ color: 0xc4c9d1, metalness: 0.85, roughness: 0.55, envMapIntensity: 0.7 }), count);
 
     const farGeo = flagGeometry(FLAG_W, FLAG_H, 14, 7);
     const phases = new Float32Array(count);
@@ -319,7 +362,149 @@ export class SalonScene {
       });
     }
     for (const mesh of [this.shafts, this.finials, this.far]) this.scene.add(mesh);
+    // A new startup took the claimed slot: an open sheet moves to the next free seat, a closed one lets go.
+    if (this.claim && this.claim.slot < list.length) {
+      if (this.claim.released) this.dropClaim();
+      else {
+        this.claim.slot = list.length;
+        this.placeClaim();
+      }
+    }
     this.lodTimer = 0;
+  }
+
+  // ---------- Hoist in place ----------
+  // The same calls as the two-pole scene, so the hoist sheet drives either one.
+
+  /**
+   * Takes empty slot `slot` (default: the best free seat) for the visitor's flag and flies to look at it from
+   * above the row in front. A second call moves the flag to the new slot and keeps its paint.
+   */
+  claimSlot(slot = this.list.length) {
+    if (slot < this.list.length || !this.slots[slot]) slot = this.list.length;
+    const p = this.slots[slot];
+    if (!p) return;
+    if (this.claim?.released) this.dropClaim();
+    // Remember the view on the first claim, so closing the sheet flies back to it.
+    if (!this.claim) this.beforeClaim = { pos: this.pos.clone(), yaw: this.yaw, pitch: this.pitch };
+    if (!this.claim) {
+      const flag = this.makeFlag();
+      drawStartupFlag(flag.canvas, { logo: null, bg: "#ffffff" });
+      flag.texture.needsUpdate = true;
+      this.claim = { slot, flag, hoist: 1, from: 1, target: 1, start: 0, dur: 1, done: null, released: false };
+    }
+    this.claim.slot = slot;
+    this.claim.flag.uniforms.uPhase.value = phaseOf(slot);
+    this.claim.flag.mesh.visible = true;
+    this.placeClaim();
+    this.setHighlight([]);
+    this.lodTimer = 0;
+    // Above and in front, a little toward the corridor: the line of sight clears the flags of the row in front.
+    const center = new THREE.Vector3(p.x + FLAG_W / 2, POLE_H - FLAG_H / 2, p.z);
+    const stand = new THREE.Vector3(center.x - p.side * 2, center.y + 2.2, p.z + 11);
+    this.flyTo(stand, center, null);
+  }
+
+  /** Lets the claimed slot go: the flag leaves once it is down (closing before the hoist lowers it). */
+  release() {
+    if (this.claim) this.claim.released = true;
+    const b = this.beforeClaim;
+    if (b) this.flyTo(b.pos, this.lookFrom(b.pos, b.yaw, b.pitch), null);
+    this.beforeClaim = null;
+    this.inset.goalRight = 0;
+    this.inset.goalBottom = 0;
+    this.idle = 0;
+  }
+
+  /** Logo and color for the claimed flag. Repaints at once (live preview). */
+  setStartup(logo: LogoImage | null, bg: string) {
+    const c = this.claim;
+    if (!c) return;
+    drawStartupFlag(c.flag.canvas, { logo, bg });
+    c.flag.texture.needsUpdate = true;
+  }
+
+  /** Moves the claimed flag up (1) or down into the clouds (0). Resolves when it arrives. */
+  hoistTo(target: number, seconds = 2): Promise<void> {
+    const c = this.claim;
+    if (!c) return Promise.resolve();
+    c.done?.();
+    c.done = null;
+    c.from = c.hoist;
+    c.target = THREE.MathUtils.clamp(target, 0, 1);
+    c.start = this.time;
+    c.dur = seconds;
+    if (seconds <= 0 || c.hoist === c.target) {
+      c.hoist = c.target;
+      this.placeClaim();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => (c.done = resolve));
+  }
+
+  /** Screen pixels at the right covered by a side panel. The view eases aside. */
+  setInsetRight(px: number) {
+    this.inset.goalRight = Math.max(0, Math.min(px, this.size.w * 0.5));
+  }
+
+  /** Screen pixels at the bottom covered by a bottom sheet. The view eases up. */
+  setInsetBottom(px: number) {
+    this.inset.goalBottom = Math.max(0, Math.min(px, this.size.h * 0.6));
+  }
+
+  private get claiming() {
+    return !!this.claim && !this.claim.released;
+  }
+
+  private placeClaim() {
+    const c = this.claim;
+    if (!c) return;
+    const p = this.slots[c.slot];
+    c.flag.mesh.position.set(p.x + 0.06, POLE_H - 0.2 - (POLE_H + 1) * (1 - c.hoist), p.z);
+  }
+
+  private dropClaim() {
+    const c = this.claim;
+    if (!c) return;
+    c.done?.();
+    this.scene.remove(c.flag.mesh);
+    c.flag.mesh.geometry.dispose();
+    c.flag.material.dispose();
+    c.flag.texture.dispose();
+    this.claim = null;
+    this.lodTimer = 0;
+  }
+
+  private updateClaim() {
+    const c = this.claim;
+    if (!c) return;
+    c.flag.uniforms.uTime.value = this.time;
+    if (c.hoist !== c.target) {
+      const f = Math.min(1, (this.time - c.start) / c.dur);
+      const k = f < 0.5 ? 4 * f ** 3 : 1 - Math.pow(-2 * f + 2, 3) / 2;
+      c.hoist = c.from + (c.target - c.from) * k;
+      if (f >= 1) {
+        c.hoist = c.target;
+        const done = c.done;
+        c.done = null;
+        done?.();
+      }
+      this.placeClaim();
+    }
+    if (c.released && c.hoist === 0 && !c.done) this.dropClaim();
+  }
+
+  /** Eases the sheet insets and shifts the projection, so the world glides aside as the sheet slides in. */
+  private updateInset(dt: number) {
+    const s = this.inset;
+    const k = 1 - Math.exp(-7 * dt);
+    s.right += (s.goalRight - s.right) * k;
+    s.bottom += (s.goalBottom - s.bottom) * k;
+    if (Math.abs(s.goalRight - s.right) < 0.5) s.right = s.goalRight;
+    if (Math.abs(s.goalBottom - s.bottom) < 0.5) s.bottom = s.goalBottom;
+    const { w, h } = this.size;
+    if (s.right > 0 || s.bottom > 0) this.camera.setViewOffset(w, h, s.right / 2, s.bottom / 2, w, h);
+    else if (this.camera.view?.enabled) this.camera.clearViewOffset();
   }
 
   /** Flies to stand in front of startup flag `i`, highlights it, and reports the selection on arrival. */
@@ -371,10 +556,10 @@ export class SalonScene {
     this.setHighlight([]);
   }
 
+  /** Along the corridor axis only, whatever the yaw: at either end the camera stops, it never slides sideways. */
   walk(meters: number) {
     this.flight = null;
-    this.goalPos.x -= Math.sin(this.goalYaw) * meters;
-    this.goalPos.z -= Math.cos(this.goalYaw) * meters;
+    this.goalPos.z -= meters;
     this.clampPos();
   }
 
@@ -390,6 +575,7 @@ export class SalonScene {
     const size = new THREE.Vector2();
     this.renderer.getSize(size);
     const prevDpr = this.renderer.getPixelRatio();
+    this.camera.clearViewOffset(); // the loop puts it back next frame
     if (prevTier !== "high") this.applyTier("high");
     this.renderer.setPixelRatio(1);
     this.post.setSize(width, height);
@@ -421,6 +607,7 @@ export class SalonScene {
       }
     });
     for (const n of this.near) n.texture.dispose();
+    this.claim?.flag.texture.dispose();
     this.atlas.dispose();
     this.scene.environment?.dispose();
     this.renderer.dispose();
@@ -430,8 +617,7 @@ export class SalonScene {
   // ---------- Build ----------
 
   private buildArgentina() {
-    const metal = new THREE.MeshStandardMaterial({ color: 0xdfe2e8, metalness: 1, roughness: 0.28 });
-    const gold = new THREE.MeshStandardMaterial({ color: 0xe0b040, metalness: 1, roughness: 0.2 });
+    const { metal, gold } = poleMaterials();
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.1, ARG_POLE_H + POLE_DEPTH, 12, 1, true), metal);
     shaft.position.set(ARG_X, (ARG_POLE_H - POLE_DEPTH) / 2, ARG_Z);
     const finial = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 10), gold);
@@ -597,6 +783,7 @@ export class SalonScene {
 
     // Hidden: near flags (drawn by their own mesh), and on the low tier, everything past the range.
     this.hidden = new Set(nearSet);
+    if (this.claim) this.hidden.add(this.claim.slot); // the visitor's own flag covers it
     if (this.tier === "low") {
       const r2 = t.lodRange * t.lodRange * 1.6;
       for (let i = 0; i < this.slots.length; i++) {
@@ -672,6 +859,13 @@ export class SalonScene {
   }
 
   private makeNear(): NearFlag {
+    const n = this.makeFlag();
+    this.near.push(n);
+    return n;
+  }
+
+  /** A cloth flag with its own canvas texture, added to the scene. */
+  private makeFlag(): NearFlag {
     const canvas = createCanvas(512, 336);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -682,9 +876,7 @@ export class SalonScene {
     const mesh = new THREE.Mesh(flagGeometry(FLAG_W, FLAG_H, sx, sy), material);
     mesh.frustumCulled = false;
     this.scene.add(mesh);
-    const n: NearFlag = { mesh, material, texture, canvas, uniforms, index: -1, painted: "none" };
-    this.near.push(n);
-    return n;
+    return { mesh, material, texture, canvas, uniforms, index: -1, painted: "none" };
   }
 
   private backlight(): BacklightUniforms {
@@ -725,9 +917,19 @@ export class SalonScene {
     this.tier = tier;
     const t = TIERS[tier];
     this.clouds.setSteps(t.steps);
-    this.post.setGodRays(t.godRays);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, t.dpr));
     this.lodTimer = 0;
+  }
+
+  private dpr() {
+    return Math.min(window.devicePixelRatio || 1, this.fx.hd ? 2 : 1);
+  }
+
+  /** Switches post effects and render resolution. The visitor's toggles land here. */
+  setFx(fx: SalonFx) {
+    this.fx = { ...fx };
+    this.post.setFx(this.fx);
+    this.renderer.setPixelRatio(this.dpr());
+    this.resize();
   }
 
   /** Drops to the low tier when the high tier cannot hold ~45 fps. Checks a few times, then stops. */
@@ -743,7 +945,9 @@ export class SalonScene {
     this.fpsChecks++;
     if (this.fpsChecks > 1 && fps < 45) {
       this.applyTier("low");
-      this.resize();
+      // The costly effects go too. The UI shows it, and the visitor can switch them back on.
+      this.setFx({ ...this.fx, ao: false, godRays: false, hd: false });
+      this.events.onFx?.(this.fx);
     }
   }
 
@@ -798,7 +1002,7 @@ export class SalonScene {
         this.idle = -30; // stay put a while after arriving
         if (f.select !== null) this.events.onSelect?.(f.select);
       }
-    } else if (this.idle > IDLE_AFTER && this.pointers.size === 0) {
+    } else if (this.idle > IDLE_AFTER && this.pointers.size === 0 && !this.claiming) {
       // Idle: drift slowly down the corridor and float.
       const ramp = Math.min(1, (this.idle - IDLE_AFTER) / 3);
       if (this.goalPos.z > DRIFT_STOP_Z) this.goalPos.z -= DRIFT_SPEED * dt * ramp;
@@ -813,6 +1017,8 @@ export class SalonScene {
     }
     const float = this.flight ? 0 : Math.sin((this.floatPhase / 30) * Math.PI * 2) * 0.3;
 
+    this.updateInset(dt);
+    this.updateClaim();
     this.camera.position.set(this.pos.x, this.pos.y + float, this.pos.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
     this.camera.updateMatrixWorld();
@@ -843,6 +1049,8 @@ export class SalonScene {
       this.lodTimer = 0.25;
     }
     this.post.render(dt);
+    // Fade in once real frames are on screen: the first ones compile shaders and can stall.
+    if (++this.frames === 3) this.renderer.domElement.style.opacity = "1";
   };
 
   private clampPos() {
@@ -858,6 +1066,7 @@ export class SalonScene {
   private resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
+    this.size = { w, h };
     this.renderer.setSize(w, h, false);
     this.post.setSize(w, h);
     this.camera.aspect = w / h;
@@ -921,8 +1130,10 @@ export class SalonScene {
       this.pinch = 0;
       if (had && !this.moved && e.type === "pointerup") {
         const hit = this.pick(e);
-        if (hit?.kind === "startup") this.focus(hit.index);
-        else if (hit?.kind === "placeholder") this.events.onPlaceholder?.();
+        // While a flag is being hoisted, other flags do not steal the view; another empty pole moves it there.
+        if (hit?.kind === "startup") {
+          if (!this.claiming) this.focus(hit.index);
+        } else if (hit?.kind === "placeholder") this.events.onPlaceholder?.(hit.index);
         else {
           this.setHighlight([]);
           this.events.onSelect?.(null);
