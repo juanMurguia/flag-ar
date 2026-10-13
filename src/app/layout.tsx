@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Schibsted_Grotesk } from "next/font/google";
 import { ViewTransition } from "react";
+import { Toaster } from "@/components/Toast";
 import "./globals.css";
 
 // Variable font: one self-hosted file covers every weight globals.css uses (400-700).
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* Page changes cross-fade through the dusk backdrop (see globals.css, "Page changes"). */}
         <ViewTransition default="page">{children}</ViewTransition>
+        <Toaster />
       </body>
     </html>
   );

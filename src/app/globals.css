@@ -304,17 +304,6 @@ h1, h2 { text-wrap: balance; }
 .sheet .btn.ghost { background: rgba(255, 255, 255, 0.22); border-color: rgba(255, 255, 255, 0.55); }
 .sheet .btn.primary:disabled { background: rgba(255, 255, 255, 0.28); color: #333; }
 
-/* Success: the result lines arrive one after another. */
-.done { display: grid; gap: 12px; }
-.done > * { animation: rise-sm 360ms var(--ease-out) both; }
-.done > :nth-child(2) { animation-delay: 60ms; }
-.done > :nth-child(3) { animation-delay: 120ms; }
-.done > :nth-child(4) { animation-delay: 180ms; }
-.done > :nth-child(n + 5) { animation-delay: 240ms; }
-.done-title { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
-.done-link { margin: 0; font-size: 14px; font-weight: 600; }
-.done-link a { color: var(--ink); text-underline-offset: 3px; }
-
 /* ---------- Forms ---------- */
 
 .field { display: grid; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
@@ -663,6 +652,21 @@ h1, h2 { text-wrap: balance; }
   .corner-link { top: 10px; }
 }
 
+/* ---------- Toast ---------- */
+
+/* Top center: the dock and the bottom sheet own the bottom edge. */
+.toast-region {
+  position: fixed; z-index: 10; top: max(12px, env(safe-area-inset-top)); left: 50%; translate: -50% 0;
+  width: max-content; max-width: min(420px, calc(100vw - 32px)); pointer-events: none;
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; border-radius: var(--radius-lg);
+  background: #fff; color: var(--ink); font-size: 14px; line-height: 1.4; box-shadow: var(--shadow-lg);
+  animation: drop-in var(--enter) var(--ease-out) both;
+}
+.toast > span { color: #1a7f37; font-weight: 700; }
+.toast p { margin: 0; }
+
 /* ---------- Keyframes ---------- */
 
 @keyframes fade { from { opacity: 0; } }
@@ -738,7 +742,7 @@ h1, h2 { text-wrap: balance; }
   @keyframes page-out { to { opacity: 0; } }
   @keyframes page-in { from { opacity: 0; } }
   .salon-bar { transition: none; }
-  .startup, .startup > *, .sheet form > *, .done > *, .cards > li { animation-delay: 0ms !important; }
+  .startup, .startup > *, .sheet form > *, .cards > li { animation-delay: 0ms !important; }
   .drop.over { transform: none; }
   .spinner { animation-duration: 1.2s; }
 }

@@ -3,7 +3,6 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import HoistPanel from "./HoistPanel";
-import { Downloads } from "./Share";
 import Toolbar, { usePause } from "./Toolbar";
 import { useDockInset, usePairScene } from "./usePairScene";
 import Icon from "./Icon";
@@ -51,10 +50,7 @@ export default function FlagApp() {
       </div>
 
       {panelOpen && (
-        <HoistPanel
-          scene={scene} webgl={webgl} closing={panel === "closing"} onClose={close} onClosed={closed}
-          doneExtra={(slug) => webgl && <Downloads scene={scene} slug={slug} />}
-        />
+        <HoistPanel scene={scene} webgl={webgl} closing={panel === "closing"} onClose={close} onClosed={closed} />
       )}
     </main>
   );

@@ -1,19 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type { LogoImage } from "@/lib/flag/texture";
 import { ACCEPT, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
 import { CATEGORIES } from "@/lib/startups/model";
-import { ShareButtons } from "./Share";
+import { toast } from "./Toast";
 import Icon from "./Icon";
 
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
-
-type Phase =
-  | { kind: "form" }
-  | { kind: "sending" }
-  | { kind: "hoisting" }
-  | { kind: "done"; slug: string; order: number };
+type Phase = "form" | "sending" | "hoisting";
 
 /** What the sheet drives: the two-pole scene on /izar, or the Hall of Fame when hoisting in place. */
 export interface HoistStage {
@@ -26,21 +21,22 @@ export interface HoistStage {
 /**
  * "Izar mi bandera": side panel (bottom sheet on phones). A pole shows a live preview while
  * the form fills in. No sign-in: the server limits by IP. Later changes go through a change request
- * that an admin approves.
+ * that an admin approves. After the hoist, a toast says we review the flag and the visitor lands on the
+ * Hall of Fame.
  */
 export default function HoistPanel({
-  scene, webgl, closing = false, onClose, onClosed, doneExtra,
+  scene, webgl, closing = false, onClose, onClosed,
 }: {
   scene: RefObject<HoistStage | null>;
   webgl: boolean | null;
-  /** Extra actions under the share buttons once the flag is up (downloads on /izar). */
-  doneExtra?: (slug: string) => ReactNode;
   closing?: boolean;
   /** `instant` skips the exit animation (keyboard close). */
   onClose: (instant?: boolean) => void;
   /** Called when the exit animation ends, so the parent can unmount the panel. */
   onClosed?: () => void;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const openedAt = useRef(Date.now());
   const panel = useRef<HTMLElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -54,9 +50,7 @@ export default function HoistPanel({
   const [bgTouched, setBgTouched] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>({ kind: "form" });
-  const phaseRef = useRef(phase);
-  phaseRef.current = phase;
+  const [phase, setPhase] = useState<Phase>("form");
   const previewUrl = useMemo(() => prepared?.logo.toDataURL() ?? null, [prepared]);
 
   useEffect(() => {
@@ -126,15 +120,14 @@ export default function HoistPanel({
   // then the logo once it is ready. "Izar" lowers it and runs the 2 s hoist.
   useEffect(() => {
     const s = scene.current;
-    if (!s || phase.kind !== "form") return;
+    if (!s || phase !== "form") return;
     s.setStartup(prepared?.logo ?? null, bg, name || undefined);
     s.hoistTo(1, 0.8);
-  }, [scene, webgl, prepared, bg, name, phase.kind]);
+  }, [scene, webgl, prepared, bg, name, phase]);
 
-  // Closing before hoisting takes the preview down.
+  // Closing takes the flag down: it is not in the hall until an admin approves it.
   useEffect(() => () => {
-    const s = scene.current;
-    if (s && phaseRef.current.kind !== "done") s.hoistTo(0, 0.6);
+    scene.current?.hoistTo(0, 0.6);
   }, [scene]);
 
   function pick(f: File | null | undefined) {
@@ -155,7 +148,7 @@ export default function HoistPanel({
     if (!prepared) return;
     const honeypot = (e.currentTarget.elements.namedItem("company") as HTMLInputElement | null)?.value ?? "";
     setError(null);
-    setPhase({ kind: "sending" });
+    setPhase("sending");
     try {
       const form = new FormData();
       form.set("logo", prepared.png, "logo.png");
@@ -168,26 +161,28 @@ export default function HoistPanel({
       form.set("company", honeypot);
       form.set("elapsed", String(Date.now() - openedAt.current));
       const res = await fetch("/api/startups", { method: "POST", body: form });
-      const body = (await res.json().catch(() => ({}))) as { message?: string; slug?: string; order?: number };
+      const body = (await res.json().catch(() => ({}))) as { message?: string; slug?: string };
       if (!res.ok || !body.slug) {
         setError(body.message || "No pudimos izar la bandera. Probá más tarde.");
-        setPhase({ kind: "form" });
+        setPhase("form");
         return;
       }
-      setPhase({ kind: "hoisting" });
+      setPhase("hoisting");
       const s = scene.current;
       if (s) {
         await s.hoistTo(0, 0.5);
         await s.hoistTo(1, 2);
       }
-      setPhase({ kind: "done", slug: body.slug, order: body.order ?? 0 });
+      toast("¡Listo! Recibimos tu bandera. La vamos a revisar y, cuando la aprobemos, aparece en el Salón de la Fama.");
+      if (pathname === "/") onClose();
+      else router.push("/");
     } catch {
       setError("Error de red. Revisá la conexión y probá de nuevo.");
-      setPhase({ kind: "form" });
+      setPhase("form");
     }
   }
 
-  const sending = phase.kind === "sending" || phase.kind === "hoisting";
+  const sending = phase !== "form";
   const ready = !!prepared && !stage && name.trim() && category && link.trim();
 
   return (
@@ -197,85 +192,71 @@ export default function HoistPanel({
       onAnimationEnd={(e) => { if (closing && e.target === e.currentTarget) onClosed?.(); }}
     >
       <button className="card-close" onClick={() => onClose()} aria-label="Cerrar" title="Cerrar"><Icon name="close" /></button>
-      {phase.kind === "done" ? (
-        <div className="done" role="status">
-          <h2 id="hoist-title" className="done-title">Tu bandera es la #{phase.order} <span aria-hidden="true">🇦🇷</span></h2>
-          <p className="done-link">
-            <a href={`/${phase.slug}`}>{SITE.replace(/^https?:\/\//, "")}/{phase.slug}</a>
-          </p>
-          <p className="muted small">Ya se ve en tu link. Aparece en el Salón de la Fama cuando la aprobemos.</p>
-          <ShareButtons name={name.trim()} order={phase.order} url={`${SITE}/${phase.slug}`} />
-          {doneExtra?.(phase.slug)}
-        </div>
-      ) : (
-        <>
-          <h2 id="hoist-title">Izá tu bandera</h2>
-          <form onSubmit={submit}>
-            <label
-              className={`drop${drag ? " over" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-              onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
-            >
-              {prepared ? (
-                <span className="drop-preview" style={{ background: bg }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl ?? ""} alt="Vista previa del logo" />
-                </span>
-              ) : (
-                <span className="swap" key={stage ?? "idle"}>
-                  {stage && <span className="spinner" aria-hidden="true" />}
-                  {stage ?? "Arrastrá tu logo o elegí un archivo (PNG, JPG o SVG)"}
-                </span>
-              )}
-              <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
-            </label>
-            {stage && prepared && <p className="muted small" role="status">{stage}</p>}
-            {file && (
-              <label className="check">
-                <input type="checkbox" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} />
-                Quitar el fondo del logo
-              </label>
-            )}
-            <label className="field">
-              <span>Nombre de la startup</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required autoComplete="organization" />
-            </label>
-            <label className="field">
-              <span>¿A qué se dedica?</span>
-              <select value={category} onChange={(e) => setCategory(e.target.value)} required>
-                <option value="" disabled>Elegí una categoría</option>
-                {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Link (web o X)</span>
-              <input
-                type="text" inputMode="url" placeholder="tustartup.com o x.com/tustartup" value={link}
-                onChange={(e) => setLink(e.target.value)} required maxLength={2048}
-              />
-            </label>
-            <label className="field color">
-              <span>Color de la bandera</span>
-              <input type="color" value={bg} onChange={(e) => { setBg(e.target.value); setBgTouched(true); }} />
-              <button type="button" className="btn ghost small-btn" onClick={() => { setBg("#ffffff"); setBgTouched(true); }}>Blanco</button>
-              {prepared && (
-                <button type="button" className="btn ghost small-btn" onClick={() => { setBg(prepared.bg); setBgTouched(false); }}>Automático</button>
-              )}
-            </label>
-            {/* Honeypot: people never see or fill this. */}
-            <input type="text" name="company" tabIndex={-1} autoComplete="off" className="hp" aria-hidden="true" />
-            {error && <p className="error" role="alert">{error}</p>}
-            <button className="btn primary wide" type="submit" disabled={!ready || sending}>
-              <span className="swap" key={phase.kind}>
-                {sending && <span className="spinner" aria-hidden="true" />}
-                {phase.kind === "sending" ? "Enviando…" : phase.kind === "hoisting" ? "Izando…" : "Izar mi bandera"}
-              </span>
-            </button>
-            <p className="consent">Al izarla, confirmás que podés usar este logo.</p>
-          </form>
-        </>
-      )}
+      <h2 id="hoist-title">Izá tu bandera</h2>
+      <form onSubmit={submit}>
+        <label
+          className={`drop${drag ? " over" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
+        >
+          {prepared ? (
+            <span className="drop-preview" style={{ background: bg }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={previewUrl ?? ""} alt="Vista previa del logo" />
+            </span>
+          ) : (
+            <span className="swap" key={stage ?? "idle"}>
+              {stage && <span className="spinner" aria-hidden="true" />}
+              {stage ?? "Arrastrá tu logo o elegí un archivo (PNG, JPG o SVG)"}
+            </span>
+          )}
+          <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
+        </label>
+        {stage && prepared && <p className="muted small" role="status">{stage}</p>}
+        {file && (
+          <label className="check">
+            <input type="checkbox" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} />
+            Quitar el fondo del logo
+          </label>
+        )}
+        <label className="field">
+          <span>Nombre de la startup</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required autoComplete="organization" />
+        </label>
+        <label className="field">
+          <span>¿A qué se dedica?</span>
+          <select value={category} onChange={(e) => setCategory(e.target.value)} required>
+            <option value="" disabled>Elegí una categoría</option>
+            {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Link (web o X)</span>
+          <input
+            type="text" inputMode="url" placeholder="tustartup.com o x.com/tustartup" value={link}
+            onChange={(e) => setLink(e.target.value)} required maxLength={2048}
+          />
+        </label>
+        <label className="field color">
+          <span>Color de la bandera</span>
+          <input type="color" value={bg} onChange={(e) => { setBg(e.target.value); setBgTouched(true); }} />
+          <button type="button" className="btn ghost small-btn" onClick={() => { setBg("#ffffff"); setBgTouched(true); }}>Blanco</button>
+          {prepared && (
+            <button type="button" className="btn ghost small-btn" onClick={() => { setBg(prepared.bg); setBgTouched(false); }}>Automático</button>
+          )}
+        </label>
+        {/* Honeypot: people never see or fill this. */}
+        <input type="text" name="company" tabIndex={-1} autoComplete="off" className="hp" aria-hidden="true" />
+        {error && <p className="error" role="alert">{error}</p>}
+        <button className="btn primary wide" type="submit" disabled={!ready || sending}>
+          <span className="swap" key={phase}>
+            {sending && <span className="spinner" aria-hidden="true" />}
+            {phase === "sending" ? "Enviando…" : phase === "hoisting" ? "Izando…" : "Izar mi bandera"}
+          </span>
+        </button>
+        <p className="consent">Al izarla, confirmás que podés usar este logo.</p>
+      </form>
     </aside>
   );
 }
