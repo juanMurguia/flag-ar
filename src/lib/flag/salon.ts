@@ -552,11 +552,17 @@ export class SalonScene {
   focus(i: number) {
     const p = this.slots[i];
     if (!p || i >= this.list.length) return;
-    // Stand halfway to the next row toward the start (nothing in between), at flag height. Look a little
-    // to the right of the flag so it sits left of center, clear of the card.
+    // Frame the flag at about half the screen width, whatever the lens and the screen shape: on the long lens
+    // a fixed distance either crops it (portrait) or leaves it small (wide screens). From that far back the
+    // row in front can stand in the way, so the eye rises a little and leans toward the corridor: the line of
+    // sight clears the flag in front of this one.
     const center = new THREE.Vector3(p.x + FLAG_W / 2, POLE_H - FLAG_H / 2, p.z);
-    const stand = new THREE.Vector3(center.x + 0.4, center.y + 0.3, p.z + DZ * 0.55);
-    const look = center.clone().add(new THREE.Vector3(1.1, 0, 0));
+    const halfH = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const halfW = Math.atan(Math.tan(halfH) * this.camera.aspect);
+    const dist = THREE.MathUtils.clamp((FLAG_W / 0.5) / (2 * Math.tan(halfW)), 7, 22);
+    const stand = new THREE.Vector3(center.x - p.side * 1.5, center.y + 2.6, p.z + dist);
+    // Aim a touch to the right of the flag on wide screens, so it sits left of center, clear of the card.
+    const look = center.clone().add(new THREE.Vector3(this.camera.aspect > 1 ? 0.8 : 0, 0, 0));
     this.flyTo(stand, look, i);
     this.setHighlight([i]);
   }
@@ -1070,8 +1076,9 @@ export class SalonScene {
     const speed = 10 * dt;
     if (this.keys.has("ArrowUp") || this.keys.has("w")) this.walk(speed);
     if (this.keys.has("ArrowDown") || this.keys.has("s")) this.walk(-speed);
-    if (this.keys.has("ArrowLeft") || this.keys.has("a")) this.turn(1.2 * dt, 0);
-    if (this.keys.has("ArrowRight") || this.keys.has("d")) this.turn(-1.2 * dt, 0);
+    // Left and right arrows step from flag to flag (SalonApp); A and D turn the view.
+    if (this.keys.has("a")) this.turn(1.2 * dt, 0);
+    if (this.keys.has("d")) this.turn(-1.2 * dt, 0);
 
     if (this.flight) {
       const f = this.flight;
@@ -1232,7 +1239,7 @@ export class SalonScene {
       this.walk(-THREE.MathUtils.clamp(e.deltaY, -120, 120) * 0.025);
     }, { passive: false });
     canvas.addEventListener("keydown", (e) => {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d"].includes(e.key)) {
+      if (["ArrowUp", "ArrowDown", "w", "a", "s", "d"].includes(e.key)) {
         this.keys.add(e.key);
         this.flight = null;
         e.preventDefault();

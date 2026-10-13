@@ -237,6 +237,34 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     scene.current?.setStartups(listRef.current);
   }, [layoutKey]);
 
+  // Flag by flag: the arrows (on screen, and ← → on the keyboard) fly to the next or previous startup, in
+  // seat order: front to back, left and right in turn. Without a flag picked, › starts at the first one.
+  const navRef = useRef<number | null>(null);
+  if (picked) {
+    const i = all.findIndex((x) => x.id === picked.id);
+    if (i >= 0) navRef.current = i;
+  }
+  const step = useCallback((d: 1 | -1) => {
+    const s = scene.current, n = listRef.current.length;
+    if (!s || !n) return;
+    const cur = navRef.current;
+    const next = cur === null ? (d > 0 ? 0 : n - 1) : (cur + d + n) % n;
+    navRef.current = next;
+    s.focus(next);
+  }, []);
+  useEffect(() => {
+    if (view !== "3d" || hoist !== "closed") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      step(e.key === "ArrowRight" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, hoist, step]);
+
   // Search results fly to the flag in 3D (its card opens on arrival). The fallback list opens the page.
   function go(s: PublicStartup) {
     const i = all.findIndex((x) => x.id === s.id);
@@ -400,12 +428,36 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           <div className="salon-card-body" key={shown.id}>
             <h2 id="salon-card-name">{shown.name}</h2>
             <a className="salon-card-link" href={shown.link} target="_blank" rel="noopener noreferrer">{shown.domain}</a>
+            {all.length > 1 && (
+              <div className="salon-card-nav">
+                <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
+                  <Icon name="prev" size={14} />
+                </button>
+                <span>{(all.findIndex((x) => x.id === shown.id) + 1) || "–"} / {all.length}</span>
+                <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
+                  <Icon name="next" size={14} />
+                </button>
+              </div>
+            )}
             <div className="salon-card-actions">
               <Link className="text-link" href={`/${shown.slug}`}>Ver bandera</Link>
               <button type="button" className="text-link" onClick={wallpaper}>Fondo 4K</button>
             </div>
           </div>
         </aside>
+      )}
+
+      {/* No flag picked: the tour starts here. With a card open, its own arrows take over. */}
+      {view === "3d" && !shown && all.length > 0 && hoist === "closed" && (
+        <nav className="salon-nav" aria-label="Recorrer las banderas">
+          <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
+            <Icon name="prev" size={14} />
+          </button>
+          <button type="button" className="salon-nav-label" onClick={() => step(1)}>Recorrer las banderas</button>
+          <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
+            <Icon name="next" size={14} />
+          </button>
+        </nav>
       )}
 
       {view === "3d" && hoist !== "closed" && (
