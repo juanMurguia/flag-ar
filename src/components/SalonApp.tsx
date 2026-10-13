@@ -20,6 +20,7 @@ const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: true, hd: true };
 const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
 const SOUND_KEY = "flagar-sound";
 const UI_IDLE_MS = 4000;
+const HINT_KEY = "flagar-hint-seen";
 
 function savedHigh(): boolean | null {
   try {
@@ -89,6 +90,40 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     };
   }, [view]);
   const [picked, setPicked] = useState<PublicStartup | null>(null);
+  // Hover label: what the flag under the mouse is. It follows the mouse through a ref, not state, so a
+  // mouse move does not re-render the page.
+  const [hovered, setHovered] = useState<{ kind: "startup" | "placeholder"; index: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const mouse = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      mouse.current = { x: e.clientX, y: e.clientY };
+      if (tipRef.current) tipRef.current.style.transform = `translate(${e.clientX + 14}px, ${e.clientY + 18}px)`;
+    };
+    window.addEventListener("pointermove", move, { passive: true });
+    return () => window.removeEventListener("pointermove", move);
+  }, []);
+  // First visit: one line on how the hall works, gone at the first click, tap, wheel, or key.
+  const [hint, setHint] = useState(false);
+  useEffect(() => {
+    let seen = true;
+    try {
+      seen = localStorage.getItem(HINT_KEY) === "1";
+    } catch {}
+    if (seen) return;
+    setHint(true);
+    const done = () => {
+      setHint(false);
+      try {
+        localStorage.setItem(HINT_KEY, "1");
+      } catch {}
+    };
+    const events = ["pointerdown", "wheel", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, done, { once: true, passive: true });
+    return () => {
+      for (const e of events) window.removeEventListener(e, done);
+    };
+  }, []);
   // The card keeps showing the last flag while it animates out after `picked` clears.
   const [shown, setShown] = useState<PublicStartup | null>(null);
   if (picked && picked !== shown) setShown(picked);
@@ -218,6 +253,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         onSelect: (i) => setPicked(i === null ? null : listRef.current[i] ?? null),
         onPlaceholder: (slot) => openRef.current(slot),
         onFx: () => setHigh(false), // auto drop on a slow GPU: shown, not saved
+        onHover: (t) => setHovered(t),
       }, startHigh ? FX_HIGH : FX_LOW);
       setHigh(startHigh);
       s.setStartups(listRef.current);
@@ -264,6 +300,22 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [view, hoist, step]);
+
+  // Closing a flag's card (the × or Escape) also flies back to the opening view, so the visitor never ends
+  // up stranded somewhere in the hall.
+  const closeCard = useCallback(() => {
+    setPicked(null);
+    navRef.current = null;
+    scene.current?.home();
+  }, []);
+  useEffect(() => {
+    if (!picked) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !(e.target as HTMLElement | null)?.closest?.("input, textarea, select")) closeCard();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picked, closeCard]);
 
   // Search results fly to the flag in 3D (its card opens on arrival). The fallback list opens the page.
   function go(s: PublicStartup) {
@@ -421,7 +473,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           className="salon-card" aria-labelledby="salon-card-name" data-state={picked ? "open" : "closing"}
           onAnimationEnd={(e) => { if (!picked && e.target === e.currentTarget) setShown(null); }}
         >
-          <button type="button" className="bare-btn salon-card-close" onClick={() => setPicked(null)} aria-label="Cerrar">
+          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar">
             <Icon name="close" size={13} />
           </button>
           {/* Keyed by flag: picking another one swaps the content in place while the card stays. */}
@@ -445,6 +497,24 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
             </div>
           </div>
         </aside>
+      )}
+
+      {view === "3d" && hovered && (
+        <div
+          ref={tipRef} className="salon-tip" aria-hidden="true"
+          style={{ transform: `translate(${mouse.current.x + 14}px, ${mouse.current.y + 18}px)` }}
+        >
+          {hovered.kind === "placeholder" ? "Izá tu bandera acá" : (() => {
+            const s = all[hovered.index];
+            if (!s) return null;
+            const cat = categoryLabel(s.category);
+            return <>{s.name}{cat && <span> · {cat}</span>}</>;
+          })()}
+        </div>
+      )}
+
+      {view === "3d" && hint && hoist === "closed" && (
+        <p className="salon-hint" role="status">Tocá una bandera para verla · Arrastrá para mirar alrededor</p>
       )}
 
       {/* No flag picked: the tour starts here. With a card open, its own arrows take over. */}

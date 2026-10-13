@@ -116,6 +116,8 @@ export interface SalonEvents {
   onPlaceholder?: (slot: number) => void;
   /** The scene switched effects off on its own (slow GPU). The UI mirrors the new state. */
   onFx?: (fx: SalonFx) => void;
+  /** The mouse moved onto a flag (or off every flag: null). For the hover label. */
+  onHover?: (target: { kind: "startup" | "placeholder"; index: number } | null) => void;
 }
 
 interface Slot {
@@ -812,12 +814,15 @@ export class SalonScene {
   private updateHover(dt: number) {
     if (this.hoverAt) {
       const hit = this.pointers.size === 0 && !this.flight ? this.pick(this.hoverAt) : null;
-      const next = hit?.kind === "placeholder" ? hit.index : -1;
+      // Every flag answers the mouse, startups and empty poles alike: a pointer cursor, a faint glow, and
+      // the label (SalonApp). Before, only empty poles did, and a startup flag gave no sign it was clickable.
+      const next = hit ? hit.index : -1;
       if (next !== this.hovered) {
         this.hovered = next;
         if (next >= 0 && !this.hoverFade.has(next)) this.hoverFade.set(next, 0);
-        this.renderer.domElement.style.cursor = next >= 0 || hit?.kind === "startup" ? "pointer" : "grab";
+        this.events.onHover?.(hit);
       }
+      if (this.pointers.size === 0) this.renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       this.hoverAt = null;
     }
     if (!this.hoverFade.size || !this.aMark || !this.aGlow) return;
@@ -1053,6 +1058,11 @@ export class SalonScene {
   }
 
   private flyTo(to: THREE.Vector3, look: THREE.Vector3, select: number | null) {
+    // The view is about to move under a still mouse: drop the hover, or its label would hang mid-air.
+    if (this.hovered >= 0) {
+      this.hovered = -1;
+      this.events.onHover?.(null);
+    }
     const d = look.clone().sub(to);
     const yaw1 = this.yaw + angleDelta(this.yaw, Math.atan2(-d.x, -d.z));
     const p1 = Math.atan2(d.y, Math.hypot(d.x, d.z));
@@ -1132,7 +1142,10 @@ export class SalonScene {
       for (const i of this.highlight) this.aGlow.setX(i, pulse);
       this.aGlow.needsUpdate = true;
     }
-    for (const n of this.near) n.uniforms.uGlow.value = n.index >= 0 && this.highlight.has(n.index) ? pulse : 0;
+    for (const n of this.near) {
+      // Near flags are their own meshes: the highlight pulse wins, else the hover glow.
+      n.uniforms.uGlow.value = n.index < 0 ? 0 : this.highlight.has(n.index) ? pulse : (this.hoverFade.get(n.index) ?? 0) * HOVER_GLOW;
+    }
     this.updateHover(dt);
 
     this.lodTimer -= dt;
@@ -1230,6 +1243,7 @@ export class SalonScene {
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
     canvas.addEventListener("pointerleave", () => {
+      if (this.hovered >= 0) this.events.onHover?.(null);
       this.hovered = -1;
       if (!this.pointers.size) canvas.style.cursor = "grab";
     });
