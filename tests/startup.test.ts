@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  accentColor, hexToRgb, hslToRgb, isLightLogo, pickBrandColor, removeSolidBackground, rgbToHsl, visibleBounds,
+  accentColor, hexToRgb, hslToRgb, isLightLogo, pickBrandColor, removeSolidBackground, rgbToHsl, solidBorderColor, visibleBounds,
 } from "@/lib/flag/startup";
 
 function pixels(...colors: [number, number, number, number][]): number[] {
@@ -51,6 +51,10 @@ describe("removeSolidBackground", () => {
     expect(removeSolidBackground(px, 10, 10)).toBe(true);
     expect(alphaAt(px, 10, 9, 9)).toBe(0);
     expect(pickBrandColor(px)).toEqual([230, 170, 70]);
+  });
+  it("reads the box color for the default flag color, and null without a box", () => {
+    expect(solidBorderColor(image(10, 10, [13, 42, 58, 255], [244, 187, 74, 255], 3, 3, 6, 6), 10, 10)).toEqual([13, 42, 58]);
+    expect(solidBorderColor(image(10, 10, [0, 0, 0, 0], [244, 187, 74, 255], 3, 3, 6, 6), 10, 10)).toBeNull();
   });
   it("keeps background-colored pixels enclosed by the mark (a ring's hole)", () => {
     const px = image(12, 12, [255, 255, 255, 255], [0, 0, 0, 255], 2, 2, 9, 9);

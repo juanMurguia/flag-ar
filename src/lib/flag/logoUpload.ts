@@ -1,5 +1,7 @@
 // Logo upload, in the browser: decode (PNG, JPG, WebP, SVG), remove the background, trim, pick the
 // default flag color, and export the PNG the server stores. The server re-encodes it again.
+import { rgbToHex } from "@/lib/startups/model";
+import { solidBorderColor } from "./startup";
 import { prepareLogo, type LogoImage } from "./texture";
 
 export const ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
@@ -109,6 +111,8 @@ export async function prepareUpload(file: File, removeBg: boolean, onStage?: (s:
     }
   }
   onStage?.("Recortando…");
-  const { logo, bg } = prepareLogo(source, removal === "solid");
+  // Read the box color from the original pixels: after removal, only the mark is left.
+  const box = solidBorderColor(base.getContext("2d")!.getImageData(0, 0, base.width, base.height).data, base.width, base.height);
+  const { logo, bg } = prepareLogo(source, removal === "solid", box && rgbToHex(box));
   return { logo, bg, png: await toPng(logo), removal };
 }

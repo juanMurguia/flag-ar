@@ -71,25 +71,42 @@ const BG_HARD = 38;
 /** Up to this distance, a pixel next to the background is a soft edge: partly transparent. */
 const BG_SOFT = 110;
 
+/** Pixel indices on the image's outer edge. */
+function borderPixels(w: number, h: number): number[] {
+  const border: number[] = [];
+  for (let x = 0; x < w; x++) border.push(x, (h - 1) * w + x);
+  for (let y = 1; y < h - 1; y++) border.push(y * w, y * w + w - 1);
+  return border;
+}
+
+/**
+ * The color of the solid box behind the mark, or null when there is none.
+ * The box is the border color, when the border is opaque and uniform.
+ * It is the best default flag color for that logo: the brand chose that background.
+ */
+export function solidBorderColor(px: ArrayLike<number>, w: number, h: number): RGB | null {
+  const border = borderPixels(w, h);
+  const opaque = border.filter((i) => px[i * 4 + 3] >= 200);
+  if (opaque.length < border.length * 0.6) return null; // already transparent (a PNG with alpha)
+  const median = (c: number) => opaque.map((i) => px[i * 4 + c]).sort((a, b) => a - b)[opaque.length >> 1];
+  const bg: RGB = [median(0), median(1), median(2)];
+  const near = border.filter((i) => px[i * 4 + 3] >= 200
+    && Math.hypot(px[i * 4] - bg[0], px[i * 4 + 1] - bg[1], px[i * 4 + 2] - bg[2]) <= BG_HARD);
+  return near.length >= border.length * 0.8 ? bg : null; // else a photo, or a mark that runs off the edge
+}
+
 /**
  * Makes a solid background transparent, in place. Returns true when it removed one.
- * The background is the border color, when the border is opaque and uniform.
+ * The background is the border color (see solidBorderColor).
  * Removal is a flood fill from the border, so the same color enclosed inside the mark stays.
  * Edge pixels get partial alpha, and the background tint is taken out of their color (no halo).
  */
 export function removeSolidBackground(px: Uint8ClampedArray | number[], w: number, h: number): boolean {
-  const border: number[] = [];
-  for (let x = 0; x < w; x++) border.push(x, (h - 1) * w + x);
-  for (let y = 1; y < h - 1; y++) border.push(y * w, y * w + w - 1);
-  const opaque = border.filter((i) => px[i * 4 + 3] >= 200);
-  if (opaque.length < border.length * 0.6) return false; // already transparent (a PNG with alpha)
-
-  const median = (c: number) => opaque.map((i) => px[i * 4 + c]).sort((a, b) => a - b)[opaque.length >> 1];
-  const bg: RGB = [median(0), median(1), median(2)];
+  const bg = solidBorderColor(px, w, h);
+  if (!bg) return false;
   const dist = (i: number) => Math.hypot(px[i * 4] - bg[0], px[i * 4 + 1] - bg[1], px[i * 4 + 2] - bg[2]);
   const isBg = (i: number) => px[i * 4 + 3] >= 200 && dist(i) <= BG_HARD;
-  const stack = border.filter(isBg);
-  if (stack.length < border.length * 0.8) return false; // a photo, or a mark that runs off the edge
+  const stack = borderPixels(w, h).filter(isBg);
 
   const removed = new Uint8Array(w * h);
   for (const i of stack) removed[i] = 1;

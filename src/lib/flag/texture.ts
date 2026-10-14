@@ -150,10 +150,13 @@ export const LOGO_MAX = 1024;
 
 /**
  * Cleans a logo that already lost its background: trims the empty border.
- * Also returns the default flag color (dominant color inverted, or white).
+ * Also returns the default flag color: `boxColor` (the upload's removed background) when given,
+ * else the dominant color inverted, or white.
  * `solidFallback`: when the ML step did not run, removes a flat background box by flood fill.
  */
-export function prepareLogo(img: LogoImage, solidFallback = false): { logo: HTMLCanvasElement; bg: string } {
+export function prepareLogo(
+  img: LogoImage, solidFallback = false, boxColor: string | null = null,
+): { logo: HTMLCanvasElement; bg: string } {
   const k = Math.min(1, LOGO_MAX / Math.max(img.width, img.height));
   const w = Math.max(1, Math.round(img.width * k)), h = Math.max(1, Math.round(img.height * k));
   const c = createCanvas(w, h);
@@ -164,7 +167,8 @@ export function prepareLogo(img: LogoImage, solidFallback = false): { logo: HTML
     removeSolidBackground(data.data, w, h);
     ctx.putImageData(data, 0, 0);
   }
-  const bg = defaultBackground(dominantColor(data.data));
+  // The upload's own background box wins: inverting the mark's color can land far from the brand.
+  const bg = boxColor ?? defaultBackground(dominantColor(data.data));
   const b = visibleBounds(data.data, w, h);
   if (!b) return { logo: c, bg };
   const out = createCanvas(b.w, b.h);
