@@ -6,7 +6,7 @@
 // at a time. With so few flags, every one is a real cloth simulation (cloth.ts) with its own cut of the wind,
 // like the Argentine flag: a vertex-shader wave read as stiff plastic next to it.
 // - Logos load only for flags on a pole or in the showcase. Nothing else is fetched.
-// - Empty slots hold "tu startup acá" flags, each in its own clean design, so the hall never looks empty.
+// - Empty slots hold plain white "tu startup acá" flags, so the hall never looks empty.
 // - Every pole stands on a crag that breaks through the clouds; far spires out in the sea give the scale.
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
@@ -1022,7 +1022,7 @@ export class SalonScene {
     if (f.painted === key) return;
     const weave = clothFinish(f.canvas.width, f.canvas.height);
     if (st) drawStartupFlag(f.canvas, { logo, bg: st.bgColor, weave });
-    else drawPlaceholderFlag(f.canvas, i, weave);
+    else drawPlaceholderFlag(f.canvas, weave);
     f.texture.needsUpdate = true;
     f.painted = key;
   }

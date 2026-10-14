@@ -90,36 +90,20 @@ export function drawStartupFlag(canvas: HTMLCanvasElement, opts: StartupFlagOpti
   applyWeave(canvas, opts.weave);
 }
 
-/** Clean two-color designs for the empty poles: each pole gets its own, so no two flags in the row match. */
-const PLACEHOLDER_DESIGNS = [
-  { bg: "#1f3a5f", accent: "#2c5282", ink: "#f4efe6", style: "solid" },
-  { bg: "#9e3f2c", accent: "#efe3d0", ink: "#fbf5ec", style: "hoist" },
-  { bg: "#256d5f", accent: "#2f8573", ink: "#f4efe6", style: "diagonal" },
-  { bg: "#f3ede2", accent: "#2b2a33", ink: "#2b2a33", style: "band" },
-  { bg: "#6b3f8f", accent: "#7f52a6", ink: "#f6f0fa", style: "diagonal" },
-  { bg: "#d9a441", accent: "#1f2a36", ink: "#1f2a36", style: "hoist" },
-] as const;
+/**
+ * Empty poles fly plain white flags: a blank cloth waiting for a brand. Colored designs read as real
+ * startups. A touch off pure white: the hall has no tone mapping, and lit pure white clips to flat.
+ */
+const PLACEHOLDER = { bg: "#f6f4ef", ink: "#2b2a33" } as const;
 
-/** An empty pole's flag: design `n` (cycled), with a "tu startup acá" mark printed in the middle. */
-export function drawPlaceholderFlag(canvas: HTMLCanvasElement, n: number, weave?: HTMLCanvasElement | null): void {
-  const d = PLACEHOLDER_DESIGNS[((n % PLACEHOLDER_DESIGNS.length) + PLACEHOLDER_DESIGNS.length) % PLACEHOLDER_DESIGNS.length];
+/** An empty pole's flag: plain white, with a "tu startup acá" mark printed in the middle. */
+export function drawPlaceholderFlag(canvas: HTMLCanvasElement, weave?: HTMLCanvasElement | null): void {
+  const d = PLACEHOLDER;
   withLayout(canvas, (ctx) => {
     ctx.fillStyle = d.bg;
     ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
-    ctx.fillStyle = d.accent;
-    if (d.style === "hoist") ctx.fillRect(0, 0, LAYOUT_W * 0.2, LAYOUT_H);
-    else if (d.style === "band") ctx.fillRect(0, LAYOUT_H * 0.8, LAYOUT_W, LAYOUT_H * 0.2);
-    else if (d.style === "diagonal") {
-      ctx.beginPath();
-      ctx.moveTo(LAYOUT_W, 0);
-      ctx.lineTo(LAYOUT_W, LAYOUT_H);
-      ctx.lineTo(LAYOUT_W * 0.35, LAYOUT_H);
-      ctx.closePath();
-      ctx.fill();
-    }
-    // The mark sits in the open field, clear of the hoist stripe and the band.
-    const cx = d.style === "hoist" ? LAYOUT_W * 0.6 : LAYOUT_W / 2;
-    const cy = d.style === "band" ? LAYOUT_H * 0.38 : LAYOUT_H * 0.42;
+    const cx = LAYOUT_W / 2;
+    const cy = LAYOUT_H * 0.42;
     const r = LAYOUT_H * 0.15;
     ctx.save();
     ctx.filter = "blur(1.2px)"; // ink in the weave, not a vector edge
