@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import HoistPanel from "./HoistPanel";
 import Toolbar, { usePause } from "./Toolbar";
@@ -23,6 +23,12 @@ export default function FlagApp() {
   // Keyboard closes (Escape) skip the exit animation: they repeat often and must feel instant.
   const close = useCallback((instant?: boolean) => setPanel(instant ? "closed" : "closing"), []);
   const closed = useCallback(() => setPanel((p) => (p === "closing" ? "closed" : p)), []);
+  // Approved flags, for the seats line in the sheet. /izar is static, so it asks the CDN-cached hall endpoint.
+  const [taken, setTaken] = useState<number | null>(null);
+  useEffect(() => {
+    fetch("/api/salon").then((r) => (r.ok ? r.json() : null)).then((d) => typeof d?.count === "number" && setTaken(d.count))
+      .catch(() => {});
+  }, []);
 
   return (
     <main className={`stage${panelOpen ? " with-sheet" : ""}`}>
@@ -50,7 +56,7 @@ export default function FlagApp() {
       </div>
 
       {panelOpen && (
-        <HoistPanel scene={scene} webgl={webgl} closing={panel === "closing"} onClose={close} onClosed={closed} />
+        <HoistPanel scene={scene} webgl={webgl} taken={taken} closing={panel === "closing"} onClose={close} onClosed={closed} />
       )}
     </main>
   );

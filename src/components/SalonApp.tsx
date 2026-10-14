@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import HoistPanel from "./HoistPanel";
 import type { SalonFx, SalonScene } from "@/lib/flag/salon";
-import { CATEGORIES, categoryLabel, type PublicStartup } from "@/lib/startups/model";
+import { CATEGORIES, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
 import { xIntent } from "./Share";
@@ -405,6 +405,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           />
         </label>
       </header>
+      {view === "3d" && <p className="salon-seats">{seatsLine(all.length)}</p>}
 
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
       {high !== null && (
@@ -528,7 +529,9 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       )}
 
       {view === "3d" && hoist !== "closed" && (
-        <HoistPanel scene={scene} webgl closing={hoist === "closing"} onClose={closeHoist} onClosed={hoistClosed} />
+        <HoistPanel
+          scene={scene} webgl taken={all.length} closing={hoist === "closing"} onClose={closeHoist} onClosed={hoistClosed}
+        />
       )}
 
       {view === "grid" && (

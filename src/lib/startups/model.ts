@@ -3,6 +3,19 @@ import { normalizeLink } from "@/lib/server/validate";
 
 export type StartupStatus = "pending" | "approved" | "rejected";
 
+/**
+ * Seats in the Hall of Fame. Only approved flags take one. When the hall is full, new flags still come in
+ * and wait as pending (the waitlist): the admin API refuses an approval past this number.
+ */
+export const SALON_SEATS = 50;
+
+/** One quiet line about the seats left. `taken` is the number of approved flags. */
+export function seatsLine(taken: number): string {
+  const left = Math.max(0, SALON_SEATS - taken);
+  if (left === 0) return "Salón completo · Lista de espera abierta";
+  return `${left === 1 ? "Queda 1" : `Quedan ${left}`} de ${SALON_SEATS} lugares · Cada bandera se revisa`;
+}
+
 /** What a public page may show. No IP hash, no moderation fields. */
 export interface PublicStartup {
   id: string;
