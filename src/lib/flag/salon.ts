@@ -928,7 +928,8 @@ export class SalonScene {
       // Strong reflections: the scene's sky fill is low (contre-jour), and a pole is mostly what it reflects.
       // The env map is set on the material: with scene.environment, three uses the scene's intensity instead.
       const envMap = this.scene.environment;
-      Object.assign(m, { color: new THREE.Color(0xe0e3e8), metalness: 0.9, roughness: 0.3, envMap, envMapIntensity: 2.6 });
+      // Kept moderate: without tone mapping, a stronger reflection of the bright sky clips the pole to flat white.
+      Object.assign(m, { color: new THREE.Color(0xe0e3e8), metalness: 0.9, roughness: 0.3, envMap, envMapIntensity: 1.4 });
       const g = gold.clone();
       Object.assign(g, { roughness: 0.36, envMap, envMapIntensity: 2.2 });
       this.poleMats = { metal: applySunRim(m, rim()), gold: applySunRim(g, rim()) };

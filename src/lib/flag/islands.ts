@@ -6,7 +6,6 @@
 // (dust and dry lichen). The cloud sea writes its own depth, so every rock sinks into the clouds on its own.
 import * as THREE from "three";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { CLOUD_TOP } from "./cloudSea";
 import { SKY_GOLD, SKY_LOW, SUN_GLOW_GLSL } from "./sunsetSky";
 import { createCanvas } from "./texture";
 
@@ -157,7 +156,7 @@ export function stoneMaterial(look: { sunDir: THREE.Vector3; sunColor: THREE.Col
   });
   const uniforms = {
     uSunDir: { value: look.sunDir }, uSunColor: { value: look.sunColor }, uFogDensity: { value: look.fogDensity },
-    uSkyLow: { value: SKY_LOW }, uSkyGold: { value: SKY_GOLD }, uCloudTop: { value: CLOUD_TOP },
+    uSkyLow: { value: SKY_LOW }, uSkyGold: { value: SKY_GOLD },
   };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -175,7 +174,6 @@ uniform vec3 uSunColor;
 uniform vec3 uSkyLow;
 uniform vec3 uSkyGold;
 uniform float uFogDensity;
-uniform float uCloudTop;
 ${SUN_GLOW_GLSL}`,
       )
       .replace(
@@ -196,12 +194,8 @@ ${SUN_GLOW_GLSL}`,
   vec3 rd = normalize(vStoneW - cameraPosition);
   float s = max(dot(rd, uSunDir), 0.0);
   vec3 haze = mix(uSkyLow, uSkyGold, pow(s, 2.5) * 0.75) + uSunColor * sunGlow(s);
-  // Low down, the rock wades in cloud: mist wraps its foot, so it rises out of the sea instead of being cut by it.
-  // Mist in the cloud tops' own rose-lavender (HDR, before exposure), not the amber sky haze. Deeper down,
-  // seen through a gap, the rock sinks into the clouds' shaded mauve: a light mist there read as a white pillar.
-  float mist = 1.0 - smoothstep(uCloudTop - 2.5, uCloudTop + 0.4, vStoneW.y);
-  vec3 mistCol = mix(vec3(1.3, 1.08, 1.15), vec3(0.3, 0.23, 0.28), smoothstep(uCloudTop - 0.8, uCloudTop - 4.5, vStoneW.y));
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, mistCol, mist * mist * 0.9);
+  // No mist band at the foot: the cloud sea writes depth, so the clouds hide the rock where they pass over it.
+  // A mist painted by height showed as a white skirt even where no cloud stood in front of the rock.
   float d = length(vStoneW - cameraPosition) * uFogDensity;
   gl_FragColor.rgb = mix(gl_FragColor.rgb, haze, 1.0 - exp(-d * d));
 }`,
