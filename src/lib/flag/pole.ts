@@ -66,9 +66,11 @@ function brushedAluminium(): THREE.MeshStandardMaterial {
   });
 }
 
-/** One pole. `clips` are the y values (local) of the rings that hold the flag. */
-export function buildPole(length: number, clips: number[], radius = POLE_RADIUS): THREE.Group {
-  const p = parts();
+/** One pole. `clips` are the y values (local) of the rings that hold the flag. `mats` overrides the shared materials. */
+export function buildPole(
+  length: number, clips: number[], radius = POLE_RADIUS, mats?: { metal: THREE.Material; gold: THREE.Material },
+): THREE.Group {
+  const p = { ...parts(), ...mats };
   const g = new THREE.Group();
   const k = radius / POLE_RADIUS;
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * TAPER, length, 28, 1, true), p.metal);
@@ -76,13 +78,13 @@ export function buildPole(length: number, clips: number[], radius = POLE_RADIUS)
   shaft.castShadow = true;
   shaft.receiveShadow = true;
   // Truck: the pulley housing under the ball. The halyard runs through it.
-  const truck = new THREE.Mesh(new THREE.CylinderGeometry(radius * 1.25, radius * 1.4, 0.34, 24), p.metal);
-  truck.position.y = 0.12;
-  const collar = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.7, radius * 1.1, 0.14, 20), p.gold);
-  collar.position.y = 0.34;
+  const truck = new THREE.Mesh(new THREE.CylinderGeometry(radius * 1.25, radius * 1.4, 0.34 * Math.min(1, k * 1.6), 24), p.metal);
+  truck.position.y = 0.12 * Math.min(1, k * 1.6);
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.7, radius * 1.1, 0.14 * Math.min(1, k * 1.6), 20), p.gold);
+  collar.position.y = 0.34 * Math.min(1, k * 1.6);
   const ball = new THREE.Mesh(p.ball, p.gold);
   ball.scale.setScalar(k);
-  ball.position.y = 0.38 + FINIAL_RADIUS * 0.92 * k;
+  ball.position.y = 0.38 * Math.min(1, k * 1.6) + FINIAL_RADIUS * 0.92 * k;
   ball.castShadow = true;
   g.add(shaft, truck, collar, ball);
   for (const y of clips) {

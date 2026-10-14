@@ -234,6 +234,8 @@ export class SunsetSky {
   environment(renderer: THREE.WebGLRenderer): THREE.Texture {
     const env = new THREE.Scene();
     const sky = makeSky(this.look.sunDir, this.look.sunColor);
+    // No far-plane trick here: on the cube camera's far plane the sky clipped away, and the poles reflected black.
+    sky.material.vertexShader = SKY_VERT.replace("gl_Position.z = gl_Position.w;", "");
     sky.scale.setScalar(90);
     env.add(sky);
     const floor = new THREE.Mesh(

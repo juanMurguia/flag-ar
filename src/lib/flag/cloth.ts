@@ -24,6 +24,10 @@ export interface WindLook {
   drag: number;
   /** Pressure along the normal, per second: how hard the wind pushes a tilted patch. */
   lift: number;
+  /** Fold stiffness, 0..1. Light bunting folds easily (low); heavy cloth holds its shape (high). Default 0.07. */
+  bend?: number;
+  /** Turbulence seed: same wind, but each flag meets its own gusts and eddies. Default 0. */
+  seed?: number;
 }
 
 export class ClothSim {
@@ -58,6 +62,8 @@ export class ClothSim {
     this.prev.set(this.pos);
     this.rest.set(this.pos);
 
+    const bend = wind.bend ?? 0.07;
+    this.time = (wind.seed ?? 0) * 37.3;
     const links: number[] = [], lengths: number[] = [], stiff: number[] = [];
     const id = (r: number, c: number) => r * this.nx + c;
     const add = (a: number, b: number, k: number) => {
@@ -75,8 +81,8 @@ export class ClothSim {
           add(id(r, c + 1), id(r + 1, c), 0.6);
         }
         // Bend: soft, so the cloth folds but does not crumple like paper.
-        if (c + 2 < this.nx) add(id(r, c), id(r, c + 2), 0.07);
-        if (r + 2 < this.ny) add(id(r, c), id(r + 2, c), 0.07);
+        if (c + 2 < this.nx) add(id(r, c), id(r, c + 2), bend);
+        if (r + 2 < this.ny) add(id(r, c), id(r + 2, c), bend);
       }
     }
     this.links = Int32Array.from(links);
@@ -103,6 +109,8 @@ export class ClothSim {
     const t = this.time;
     this.computeNormals();
     const { speed, drag, lift } = this.wind;
+    // Each flag's own eddy scale: the same wind rolls a little slower or faster down a different cloth.
+    const f = 1 + 0.12 * Math.sin((this.wind.seed ?? 0) * 2.1);
     const dt2 = STEP * STEP;
     for (let r = 0; r < ny; r++) {
       for (let c = 1; c < nx; c++) {
@@ -113,8 +121,8 @@ export class ClothSim {
         // up and down (y). The phase runs along x, so the disturbance travels from the hoist to the fly end.
         const gust = 1 + 0.3 * Math.sin(t * 0.55) + 0.18 * Math.sin(t * 1.7 + 1.3) + 0.08 * Math.sin(t * 4.1);
         const wx = speed * gust;
-        const wy = speed * 0.12 * Math.sin(t * 2.3 - x * 0.9 + r * 0.2);
-        const wz = speed * (0.4 * Math.sin(t * 4.2 - x * 1.9) + 0.18 * Math.sin(t * 7.3 - x * 3.1 + y) + 0.15 * Math.sin(t * 1.1 + y * 0.8));
+        const wy = speed * 0.12 * Math.sin(t * 2.3 * f - x * 0.9 + r * 0.2);
+        const wz = speed * (0.4 * Math.sin(t * 4.2 * f - x * 1.9 * f) + 0.18 * Math.sin(t * 7.3 * f - x * 3.1 + y) + 0.15 * Math.sin(t * 1.1 + y * 0.8));
         const rx = wx - vx, ry = wy - vy, rz = wz - vz;
         const nxv = normal[i], nyv = normal[i + 1], nzv = normal[i + 2];
         const press = (rx * nxv + ry * nyv + rz * nzv) * lift;

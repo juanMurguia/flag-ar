@@ -1,34 +1,30 @@
 // Hall of Fame: a short row of flagpoles rising out of a sea of golden sunset clouds. A central
 // corridor runs toward the sun; the Argentine flag stands in it, a little larger and taller.
 //
-// Cost model, so it holds with thousands of flags:
-// - Poles and finials: one InstancedMesh each, for every slot in the grid.
-// - Flags, levels of detail:
-//     near (closest startups in view): own cloth mesh, 512 px texture, physical fabric material;
-//     far  (everything else):           one instanced low-poly plane; logos come from a shared atlas,
-//                                        flags without a loaded logo show their flat color.
-//   Both bend with the same vertex shader, so a flag does not jump when it changes level.
-// - Logos load only for flags in view and close. Nothing else is fetched.
-// - Empty slots hold muted "tu startup acá" flags, so the hall never looks empty.
-// - Home stays light: the hall is one row of HALL_POLES poles. Startups take the best seats, and at least
-//   one pole stays empty for the next one. The rest show in the showcase (tour, search, link), one cloth at a time.
+// Cost model: home stays light. The hall is one row of HALL_POLES poles. Startups take the best seats, and at
+// least one pole stays empty for the next one. The rest show in the showcase (tour, search, link), one cloth
+// at a time. With so few flags, every one is a real cloth simulation (cloth.ts) with its own cut of the wind,
+// like the Argentine flag: a vertex-shader wave read as stiff plastic next to it.
+// - Logos load only for flags on a pole or in the showcase. Nothing else is fetched.
+// - Empty slots hold "tu startup acá" flags, each in its own clean design, so the hall never looks empty.
+// - Every pole stands on a crag that breaks through the clouds; far spires out in the sea give the scale.
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
 import { Birds } from "./birds";
 import { ClothSim, type WindLook } from "./cloth";
-import { CLOUD_BOTTOM, CLOUD_TOP, CloudSea } from "./cloudSea";
+import { CLOUD_TOP, CloudSea } from "./cloudSea";
 import { CLOTH_NORMAL_REPEAT, applyBacklight, applyRim, applySunRim, clothNormalMap, type BacklightUniforms } from "./fabric";
+import { farCrags, poleIsland, stoneMaterial } from "./islands";
 import { Motes } from "./motes";
-import { poleMaterials } from "./pole";
+import { buildPole, poleMaterials } from "./pole";
 import { Post, type PostFx } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
-import { clothFinish, createCanvas, drawArgentineFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
-import { applyWave, flagGeometry, waveUniforms, type FoldUniforms, type WaveUniforms } from "./wave";
+import { clothFinish, createCanvas, drawArgentineFlag, drawPlaceholderFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
+import { flagGeometry } from "./wave";
 
 // ---------- Layout (meters) ----------
 const FLAG_W = 3.1, FLAG_H = 2.0;
 const POLE_H = 4; // above y = 0: the flag rides just over the cloud tops; the flags matter, not the poles
-const POLE_DEPTH = CLOUD_TOP - CLOUD_BOTTOM + 3; // below them, out of sight
 // The hero: its pole rises far above the field, so the flag flies high in the frame, over every other
 // flag, like a flag on a summit. The cloth is about twice the size of the others.
 const ARG_POLE_H = POLE_H * 2.7;
@@ -67,7 +63,17 @@ const CUT_MS = 260; // fade out, and back in, around a jump between the hall and
 const POLE_RIM = 1.6; // gold outline on the poles against the sun
 const BIRD_FLOCKS = 3;
 const MOTE_GAIN = 1.0; // HDR, added per speck. Deep amber: bright points tone-map to white, and white specks read as snow
-const FOG_DENSITY = 0.002; // aerial perspective: far rows fade into the amber haze. Much more washes the whole frame out
+const FOG_DENSITY = 0.0024; // aerial perspective: far crags fade into the amber haze. Much more washes the whole frame out
+// The crags the poles stand on: their planed tops just clear the cloud tops.
+const HALL_ROCK = { radius: 0.95, top: CLOUD_TOP + 0.2 };
+const ARG_ROCK = { radius: 2.0, top: CLOUD_TOP + 0.6 };
+const HALL_POLE_R = 0.07, ARG_POLE_R = 0.13;
+// Hall cloth: light bunting on the same wind as the Argentine flag. Each pole gets its own drag, lift, fold
+// stiffness and turbulence seed (hallWind), so no two flags move alike.
+const HALL_WARMUP = 3; // s of simulated wind before the hall shows
+const HALL_RIM = 0.22;
+const HALL_BACKLIGHT = 1.2; // thin cloth: the low sun shows through it
+const HALL_TRANSMIT = 0.16; // a little of the sun through it: more, and a red flag near the sun burns like neon
 
 // ---------- Camera ----------
 // Low and back, on a long lens, looking level: the eye sits just over the cloud tops, so the dark backlit
@@ -92,14 +98,6 @@ const ORBIT_EL_MIN = -0.06, ORBIT_EL_MAX = 0.3; // rad below and above it
 const ORBIT_ZOOM_MIN = 0.7, ORBIT_ZOOM_MAX = 1.35; // times the framing distance
 const EASE_ORBIT = 7; // 1/s
 
-const ATLAS_COLS = 8;
-const ATLAS_TILE: [number, number] = [256, 168];
-const TILE_BLANK = 0, TILE_PLACEHOLDER = 1;
-// Empty slots: plain undyed cloth, a few warm whites so the field does not look printed. The color
-// belongs to the startups and the Argentine flag.
-const PLACEHOLDER_COLORS = ["#fbfaf8", "#f6f5f3", "#fdfcfb", "#f3f2f1"]; // near white: the warm sunset tints them cream on its own
-const PLACEHOLDER_LIFT = 0.8; // under 1: backlit, the empty field glows gold but stays darker than the hero
-const FRONT_MARKS = 8; // the first empty slots (the best seats) show the "tu startup acá" mark; the rest only on hover
 // The hall, small on purpose: a big field of poles and cloths cost too much GPU and CPU on the home page.
 const HALL_POLES = 4;
 const HALL_INNER = 4.5; // m from the axis to the center of the inner cloths
@@ -113,8 +111,8 @@ const BACKDROP_SCALE = 0.5;
 
 type Tier = "high" | "low";
 const TIERS = {
-  high: { steps: 72, cloth: [32, 20] as const, near: 24, lodRange: 300, motes: 450 },
-  low: { steps: 28, cloth: [16, 10] as const, near: 10, lodRange: 150, motes: 180 },
+  high: { steps: 72, cloth: [30, 19] as const, motes: 450, shadows: true },
+  low: { steps: 28, cloth: [16, 10] as const, motes: 180, shadows: false },
 };
 
 /** Visitor-facing effects. `hd` renders at up to 2x device pixels; off renders at 1x. */
@@ -171,6 +169,12 @@ export function phaseOf(i: number) {
   return (i * 2.39996) % (Math.PI * 2);
 }
 
+/** Slot i's cut of the wind: the hero's speed and direction, its own weight, stiffness and gusts. */
+function hallWind(i: number): WindLook {
+  const h = (k: number) => 0.5 + 0.5 * Math.sin(phaseOf(i) * k + k);
+  return { speed: ARG_CLOTH.speed, drag: 2.5 + 0.7 * h(1.3), lift: 3.5 + 1.0 * h(2.7), bend: 0.03 + 0.035 * h(4.1), seed: i + 1 };
+}
+
 /** The pair shot: the picked startup's cloth next to the Argentine flag. */
 interface Showcase {
   mesh: THREE.Mesh;
@@ -182,20 +186,22 @@ interface Showcase {
   painted: "none" | "color" | "logo";
 }
 
-interface NearFlag {
+/** A simulated cloth on a hall pole (or the visitor's own flag), with its own canvas texture. */
+interface HallFlag {
   mesh: THREE.Mesh;
+  geo: THREE.BufferGeometry;
   material: THREE.MeshPhysicalMaterial;
   texture: THREE.CanvasTexture;
   canvas: HTMLCanvasElement;
-  uniforms: WaveUniforms & BacklightUniforms;
-  index: number; // startup index, -1 when free
-  painted: "none" | "color" | "logo";
+  uniforms: BacklightUniforms;
+  cloth: ClothSim;
+  painted: string; // what is on the canvas: "", "empty", "<id>:color" or "<id>:logo"
 }
 
 /** The visitor's own flag on an empty pole, while the hoist sheet is open (and after, until the layout changes). */
 interface Claim {
   slot: number;
-  flag: NearFlag;
+  flag: HallFlag;
   hoist: number; // 1 at the top of the pole, 0 down in the clouds
   from: number;
   target: number;
@@ -230,27 +236,18 @@ export class SalonScene {
   private disposed = false;
   private resizeObserver: ResizeObserver;
 
-  // Instanced layers
-  private poleMats: { metal: THREE.MeshStandardMaterial; gold: THREE.MeshStandardMaterial; finial: THREE.MeshStandardMaterial } | null = null;
-  private shafts: THREE.InstancedMesh | null = null;
-  private finials: THREE.InstancedMesh | null = null;
-  private far: THREE.InstancedMesh | null = null;
-  private farUniforms: WaveUniforms & BacklightUniforms;
-  private farMaterial: THREE.MeshLambertMaterial;
-  private atlasCanvas: HTMLCanvasElement;
-  private atlas: THREE.CanvasTexture;
-  private atlasSlots = new Map<number, number>(); // startup index -> tile
-  private atlasDirty = false;
-  private aAtlas: THREE.InstancedBufferAttribute | null = null;
-  private aGlow: THREE.InstancedBufferAttribute | null = null;
-  private aMark: THREE.InstancedBufferAttribute | null = null; // atlas alpha scale: shows or hides the placeholder mark
-  private hovered = -1; // empty slot under the mouse
-  private hoverFade = new Map<number, number>(); // empty slot -> 0..1, easing in or out
+  // The hall: poles on their crags, and one simulated cloth per slot. Built once; a new list repaints it.
+  private poleMats: { metal: THREE.MeshStandardMaterial; gold: THREE.MeshStandardMaterial } | null = null;
+  private stone: THREE.MeshStandardMaterial;
+  private plinth = new THREE.MeshStandardMaterial({ color: 0x9a948c, roughness: 0.85, metalness: 0 });
+  private hall = new THREE.Group();
+  private flags: HallFlag[] = [];
+  private sunLight: THREE.DirectionalLight;
+  private hovered = -1; // slot under the mouse
+  private hoverFade = new Map<number, number>(); // slot -> 0..1, easing in or out
   private hoverAt: { clientX: number; clientY: number } | null = null; // last mouse position to pick, once per frame
-  private hidden = new Set<number>(); // slots drawn by a near flag, or out of range
 
-  private near: NearFlag[] = [];
-  private argUniforms: WaveUniforms & BacklightUniforms;
+  private argUniforms: BacklightUniforms;
   private argCloth: ClothSim | null = null;
   private argGeo: THREE.BufferGeometry | null = null;
   private images = new Map<string, LogoImage | "loading" | "error">();
@@ -332,28 +329,31 @@ export class SalonScene {
     this.birds = new Birds(BIRD_FLOCKS, START.z, new THREE.Color(0.05, 0.04, 0.05), HORIZON.clone().multiplyScalar(1.2));
     this.scene.add(this.birds.mesh);
 
+    // The low sun casts long shadows toward the viewer: the poles across their crags, the cloths on the rock.
+    // One map over the hall and the hero only; the far crags take no part.
     const sun = new THREE.DirectionalLight(0xffc27a, 2.1);
-    sun.position.copy(this.sunDir).multiplyScalar(100);
-    this.scene.add(sun);
+    const focus = new THREE.Vector3(0, 2, (FIRST_Z + ARG_Z) / 2);
+    sun.position.copy(this.sunDir).multiplyScalar(90).add(focus);
+    sun.target.position.copy(focus);
+    sun.castShadow = t.shadows;
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 16, bottom: -12, near: 40, far: 150 });
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.03;
+    sun.shadow.radius = 3;
+    renderer.shadowMap.enabled = t.shadows;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.sunLight = sun;
+    this.scene.add(sun, sun.target);
     // A cool sky fill over a warm cloud bounce: the cool keeps the shadows from going muddy orange.
     this.scene.add(new THREE.HemisphereLight(0xc4cbe0, 0xf2b070, 0.35));
 
-    const bl = (): BacklightUniforms => ({
-      uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: BACKLIGHT }, uGlow: { value: 0 },
-    });
-    this.argUniforms = { ...waveUniforms(ARG_W, ARG_H, 0.6), ...bl() };
-    this.farUniforms = { ...waveUniforms(FLAG_W, FLAG_H), ...bl() };
-    // The field glows a little less than the hero: backlit cloth, but the hero stays the brightest flag.
-    this.farUniforms.uBacklight.value = 1.1;
+    this.stone = stoneMaterial({ sunDir: this.sunDir, sunColor: this.sunColor, fogDensity: FOG_DENSITY });
+    this.argUniforms = this.backlight();
     this.buildArgentina();
-
-    this.atlasCanvas = createCanvas(ATLAS_TILE[0] * ATLAS_COLS, ATLAS_TILE[1] * ATLAS_COLS);
-    this.atlas = new THREE.CanvasTexture(this.atlasCanvas);
-    this.atlas.colorSpace = THREE.SRGBColorSpace;
-    this.atlas.generateMipmaps = false; // mipmaps would bleed between tiles
-    this.atlas.minFilter = THREE.LinearFilter;
-    this.drawPlaceholderTile();
-    this.farMaterial = this.atlasMaterial();
+    this.hall.name = "hall";
+    this.scene.add(this.hall);
+    this.scene.add(farCrags(this.stone, START));
 
     this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx, this.backdrop, BACKDROP_SCALE);
     this.intro();
@@ -374,68 +374,19 @@ export class SalonScene {
     const prevIds = this.knownIds;
     this.list = list;
     this.knownIds = new Set(list.map((s) => s.id));
-    for (const n of this.near) this.freeNear(n);
-    this.atlasSlots.clear();
-    this.hidden.clear();
     this.rising.clear();
-    for (const m of [this.shafts, this.finials, this.far]) {
-      if (!m) continue;
-      this.scene.remove(m);
-      m.geometry.dispose();
-    }
     this.poled = Math.min(list.length, HALL_POLES - 1); // one pole always free: the hoist needs it
     const count = HALL_POLES;
     this.cols = 2;
     this.slots = hallSlots(count);
-
-    // Brushed, weathered aluminium (shared with the pair page), not chrome: at this distance a mirror finish reads as CG.
-    const metal = this.rimmed().metal;
-    const shaftGeo = new THREE.CylinderGeometry(0.055, 0.075, POLE_H + POLE_DEPTH, 12, 1, true);
-    shaftGeo.translate(0, (POLE_H - POLE_DEPTH) / 2, 0);
-    this.shafts = new THREE.InstancedMesh(shaftGeo, metal, count);
-    const finialGeo = new THREE.SphereGeometry(0.12, 10, 6);
-    finialGeo.translate(0, POLE_H + 0.1, 0);
-    this.finials = new THREE.InstancedMesh(finialGeo, this.rimmed().finial, count);
-
-    const farGeo = flagGeometry(FLAG_W, FLAG_H, 14, 7);
-    const phases = new Float32Array(count);
-    const atlasAttr = new Float32Array(count * 2);
-    farGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
-    this.aAtlas = new THREE.InstancedBufferAttribute(atlasAttr, 2);
-    this.aGlow = new THREE.InstancedBufferAttribute(new Float32Array(count), 1);
-    farGeo.setAttribute("aAtlas", this.aAtlas);
-    farGeo.setAttribute("aGlow", this.aGlow);
-    const marks = new Float32Array(count);
-    for (let i = 0; i < count; i++) marks[i] = this.baseMark(i);
-    this.aMark = new THREE.InstancedBufferAttribute(marks, 1);
-    farGeo.setAttribute("aMark", this.aMark);
-    this.hovered = -1;
-    this.hoverFade.clear();
-    this.far = new THREE.InstancedMesh(farGeo, this.farMaterial, count);
-    this.far.frustumCulled = false;
-
-    const m = new THREE.Matrix4();
-    const color = new THREE.Color();
-    const blank = this.tileOffset(TILE_BLANK), ph = this.tileOffset(TILE_PLACEHOLDER);
-    for (let i = 0; i < count; i++) {
-      const p = this.slots[i];
-      m.makeTranslation(p.x, 0, p.z);
-      this.shafts.setMatrixAt(i, m);
-      this.finials.setMatrixAt(i, m);
-      this.far.setMatrixAt(i, this.flagMatrix(i, m));
-      phases[i] = phaseOf(i);
-      const real = i < this.poled;
-      if (real) color.set(list[i].bgColor);
-      else color.set(PLACEHOLDER_COLORS[(i * 7 + (i >> 3)) % PLACEHOLDER_COLORS.length]).multiplyScalar(PLACEHOLDER_LIFT);
-      this.far.setColorAt(i, color);
-      const o = real ? blank : ph;
-      atlasAttr[i * 2] = o[0];
-      atlasAttr[i * 2 + 1] = o[1];
-    }
+    if (!this.flags.length) this.buildHall();
     if (prevIds) {
       for (let i = 0; i < this.poled; i++) if (!prevIds.has(list[i].id)) this.rising.set(i, this.time);
     }
-    for (const mesh of [this.shafts, this.finials, this.far]) this.scene.add(mesh);
+    for (let i = 0; i < count; i++) {
+      this.paintFlag(i);
+      this.placeFlag(i);
+    }
     // In the showcase, the new hall stays hidden. Its startup left the list: back to the hall.
     if (this.showing >= list.length) this.leaveShowcase();
     else if (this.showing >= 0) {
@@ -450,6 +401,7 @@ export class SalonScene {
         this.placeClaim();
       }
     }
+    this.refreshFlags();
     this.lodTimer = 0;
   }
 
@@ -469,15 +421,16 @@ export class SalonScene {
     // Remember the view on the first claim, so closing the sheet flies back to it.
     if (!this.claim) this.beforeClaim = { pos: this.pos.clone(), yaw: this.yaw, pitch: this.pitch };
     if (!this.claim) {
-      const flag = this.makeFlag();
+      const flag = this.makeFlag(hallWind(slot));
       drawStartupFlag(flag.canvas, { logo: null, bg: "#ffffff", weave: clothFinish(flag.canvas.width, flag.canvas.height) });
       flag.texture.needsUpdate = true;
+      this.scene.add(flag.mesh);
       this.claim = { slot, flag, hoist: 1, from: 1, target: 1, start: 0, dur: 1, done: null, released: false };
     }
     this.claim.slot = slot;
-    this.claim.flag.uniforms.uPhase.value = phaseOf(slot);
     this.claim.flag.mesh.visible = true;
     this.placeClaim();
+    this.refreshFlags();
     this.setHighlight([]);
     this.lodTimer = 0;
     // Above and in front, a little toward the corridor: the line of sight clears the flags of the row in front.
@@ -540,7 +493,7 @@ export class SalonScene {
     const c = this.claim;
     if (!c) return;
     const p = this.slots[c.slot];
-    c.flag.mesh.position.set(p.x + 0.06, POLE_H - 0.2 - (POLE_H + 1) * (1 - c.hoist), p.z);
+    c.flag.mesh.position.set(p.x + HALL_POLE_R + 0.02, POLE_H - 0.2 - (POLE_H + 1) * (1 - c.hoist), p.z);
   }
 
   private dropClaim() {
@@ -548,17 +501,18 @@ export class SalonScene {
     if (!c) return;
     c.done?.();
     this.scene.remove(c.flag.mesh);
-    c.flag.mesh.geometry.dispose();
+    c.flag.geo.dispose();
     c.flag.material.dispose();
     c.flag.texture.dispose();
     this.claim = null;
+    this.refreshFlags();
     this.lodTimer = 0;
   }
 
-  private updateClaim() {
+  private updateClaim(dt: number) {
     const c = this.claim;
     if (!c) return;
-    c.flag.uniforms.uTime.value = this.time;
+    if (c.flag.mesh.visible) c.flag.cloth.update(dt, c.flag.geo);
     if (c.hoist !== c.target) {
       const f = Math.min(1, (this.time - c.start) / c.dur);
       const k = f < 0.5 ? 4 * f ** 3 : 1 - Math.pow(-2 * f + 2, 3) / 2;
@@ -625,10 +579,6 @@ export class SalonScene {
   /** Glows these startup flags (search, city filter), the ones on a hall pole. Empty clears. */
   setHighlight(indices: number[]) {
     this.highlight = new Set(indices.filter((i) => i >= 0 && i < this.poled));
-    if (this.aGlow) {
-      (this.aGlow.array as Float32Array).fill(0);
-      this.aGlow.needsUpdate = true;
-    }
   }
 
   /**
@@ -771,45 +721,41 @@ export class SalonScene {
 
   // ---------- Showcase ----------
   // A picked startup flag stands alone with the Argentine flag: its own pole right of the hero, the same
-  // simulated cloth at the same size, the same material, rim, and spot. The hall (field, poles, the cheap
-  // wave flags) is hidden. Built once on first use, then repainted for each startup.
+  // simulated cloth at the same size, the same material, rim, and spot. The hall (its crags, poles and
+  // cloths) is hidden. Built once on first use, then repainted for each startup.
 
   /** The pair's pole and cloth, built like the hero's (buildArgentina). */
   private showcaseParts(): Showcase {
     if (this.show) return this.show;
-    const { metal, gold } = this.rimmed();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, SHOW_POLE_H + POLE_DEPTH, 16, 1, true), metal);
-    shaft.position.set(SHOW_X, (SHOW_POLE_H - POLE_DEPTH) / 2, ARG_Z);
-    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10), gold);
-    finial.position.set(SHOW_X, SHOW_POLE_H + 0.24, ARG_Z);
+    const stand = this.standPole(SHOW_X, ARG_Z, SHOW_POLE_H, ARG_POLE_R, ARG_ROCK.radius * 0.75, ARG_ROCK.top - 0.3, 41);
 
     const canvas = createCanvas(2100, 1350); // 1.5x the hero's canvas: the logo stays sharp at 4K
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const mat = this.fabricMaterial(tex, { ...waveUniforms(ARG_W, ARG_H, 0.6), ...this.backlight() }, null, false);
+    const mat = this.fabricMaterial(tex, this.backlight());
     applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
     const geo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
-    mesh.position.set(SHOW_X + 0.12, SHOW_POLE_H - 0.25, ARG_Z);
+    mesh.castShadow = true;
+    mesh.position.set(SHOW_X + ARG_POLE_R + 0.03, SHOW_POLE_H - 0.25, ARG_Z);
 
     const center = new THREE.Vector3(SHOW_X + ARG_W / 2, SHOW_POLE_H - 0.25 - ARG_H / 2, ARG_Z);
     const spot = new THREE.SpotLight(0xffd08a, SPOT_GAIN, 0, 0.16, 0.85, 0);
     spot.position.copy(center).add(new THREE.Vector3(0, 30, 18));
     spot.target.position.copy(center);
 
-    const parts = [shaft, finial, mesh, spot, spot.target];
+    const parts = [stand, mesh, spot, spot.target];
     for (const p of parts) p.visible = false;
     this.scene.add(...parts);
     this.show = { mesh, tex, canvas, geo, cloth: null, parts, painted: "none" };
     return this.show;
   }
 
-  /** Hides or shows the hall: the field, its poles, the near flags, and the visitor's flag. */
+  /** Hides or shows the hall: its crags, poles and cloths, and the visitor's flag. */
   private setHall(on: boolean) {
-    for (const m of [this.far, this.shafts, this.finials]) if (m) m.visible = on;
-    for (const n of this.near) n.mesh.visible = on && n.index >= 0;
+    this.hall.visible = on;
     if (this.claim) this.claim.flag.mesh.visible = on;
   }
 
@@ -960,9 +906,8 @@ export class SalonScene {
         mats.forEach((mm) => mm.dispose());
       }
     });
-    for (const n of this.near) n.texture.dispose();
+    for (const f of this.flags) f.texture.dispose();
     this.claim?.flag.texture.dispose();
-    this.atlas.dispose();
     this.scene.environment?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -971,31 +916,46 @@ export class SalonScene {
   // ---------- Build ----------
 
   /**
-   * Pole materials with a gold rim against the sun, built once and kept across layouts. Shafts and field
-   * finials are painted white: bare metal goes near black against the sun. A faint warm emissive stands for
-   * the sky light a white pole picks up. The hero keeps its gilt finial (a copy of the pair page one).
+   * Pole materials with a gold rim against the sun, built once. Brushed aluminium (pole.ts) with its streaks,
+   * smoother and brighter than the pair page's: against a low sun, rough metal goes near black, and a pole
+   * reads as metal by the long soft highlight the sky draws down it. Satin gilt on the finials.
    */
   private rimmed() {
     if (!this.poleMats) {
-      const { gold } = poleMaterials();
+      const { metal, gold } = poleMaterials();
       const rim = () => ({ uRimSunDir: { value: this.sunDir }, uRimSunColor: { value: this.sunColor }, uSunRim: { value: POLE_RIM } });
-      const paint = () => new THREE.MeshStandardMaterial({ color: 0xf2f2f0, metalness: 0.05, roughness: 0.45, emissive: 0x2a2826 });
-      this.poleMats = {
-        metal: applySunRim(paint(), rim()),
-        gold: applySunRim(gold.clone(), rim()),
-        finial: applySunRim(paint(), rim()),
-      };
+      const m = metal.clone();
+      // Strong reflections: the scene's sky fill is low (contre-jour), and a pole is mostly what it reflects.
+      // The env map is set on the material: with scene.environment, three uses the scene's intensity instead.
+      const envMap = this.scene.environment;
+      Object.assign(m, { color: new THREE.Color(0xe0e3e8), metalness: 0.9, roughness: 0.3, envMap, envMapIntensity: 2.6 });
+      const g = gold.clone();
+      Object.assign(g, { roughness: 0.36, envMap, envMapIntensity: 2.2 });
+      this.poleMats = { metal: applySunRim(m, rim()), gold: applySunRim(g, rim()) };
     }
     return this.poleMats;
   }
 
+  /**
+   * A pole on its crag: the island (rock and plinth) at (x, z) with its planed top at `rockTop`, and a
+   * brushed metal pole with truck, collar and gilt ball rising to `poleH`, with the clips for a flag.
+   */
+  private standPole(x: number, z: number, poleH: number, radius: number, rockR: number, rockTop: number, seed: number, flagH = ARG_H) {
+    const g = new THREE.Group();
+    const island = poleIsland(this.stone, this.plinth, rockR, rockTop, seed, radius);
+    island.position.set(x, 0, z);
+    const foot = island.userData.foot as number;
+    const pole = buildPole(poleH - foot + 0.3, [-0.25, -0.25 - flagH], radius, this.rimmed());
+    pole.position.set(x, poleH, z);
+    pole.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = o.receiveShadow = true;
+    });
+    g.add(island, pole);
+    return g;
+  }
+
   private buildArgentina() {
-    const { metal, gold } = this.rimmed();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, ARG_POLE_H + POLE_DEPTH, 16, 1, true), metal);
-    shaft.position.set(ARG_X, (ARG_POLE_H - POLE_DEPTH) / 2, ARG_Z);
-    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 10), gold);
-    finial.position.set(ARG_X, ARG_POLE_H + 0.24, ARG_Z);
-    this.scene.add(shaft, finial);
+    this.scene.add(this.standPole(ARG_X, ARG_Z, ARG_POLE_H, ARG_POLE_R, ARG_ROCK.radius, ARG_ROCK.top, 7));
 
     const canvas = createCanvas(1400, 900);
     drawArgentineFlag(canvas, clothFinish(canvas.width, canvas.height));
@@ -1003,14 +963,15 @@ export class SalonScene {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     // The hero is simulated cloth (cloth.ts): the CPU moves the vertices each frame, so the material has no
-    // wave. Translucency and a gold rim as for the field. The field keeps the cheap vertex-shader wave.
-    const mat = this.fabricMaterial(tex, this.argUniforms, null, false);
+    // wave. Translucency and a gold rim, as for the hall flags.
+    const mat = this.fabricMaterial(tex, this.argUniforms);
     applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
     this.argGeo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
     this.argCloth = new ClothSim(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1], ARG_CLOTH);
     const flag = new THREE.Mesh(this.argGeo, mat);
     flag.frustumCulled = false;
-    flag.position.set(ARG_X + 0.12, ARG_POLE_H - 0.25, ARG_Z);
+    flag.castShadow = true;
+    flag.position.set(ARG_X + ARG_POLE_R + 0.03, ARG_POLE_H - 0.25, ARG_Z);
     this.scene.add(flag);
 
     // A warm spot on its face from above and in front: the brightest thing in the view.
@@ -1020,8 +981,8 @@ export class SalonScene {
     this.scene.add(spot, spot.target);
   }
 
-  /** `fold`: fold shading and sun through the cloth. Without it, the field's gust wave. `wave` false: no motion (simulated cloth). */
-  private fabricMaterial(map: THREE.Texture, uniforms: WaveUniforms & BacklightUniforms, fold: FoldUniforms | null = null, wave = true) {
+  /** Cloth for a simulated flag: woven normal map, print-tinted sheen, and the sun through it. */
+  private fabricMaterial(map: THREE.Texture, uniforms: BacklightUniforms) {
     const normal = clothNormalMap();
     normal.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const mat = new THREE.MeshPhysicalMaterial({
@@ -1031,76 +992,51 @@ export class SalonScene {
       normalMap: normal, normalScale: new THREE.Vector2(0.9, 0.9),
     });
     mat.normalMap!.repeat.set(...CLOTH_NORMAL_REPEAT);
-    if (wave) applyWave(mat, uniforms, false, !fold, fold);
     return applyBacklight(mat, uniforms);
   }
 
-  /**
-   * Far flags: Lambert, wave, instanced, with a per-instance atlas tile. The tile's alpha mixes the logo
-   * over the instance color: blank tile = flat color, placeholder tile = white mark on a muted color.
-   */
-  private atlasMaterial(): THREE.MeshLambertMaterial {
-    const mat = new THREE.MeshLambertMaterial({ map: this.atlas, side: THREE.DoubleSide });
-    applyWave(mat, this.farUniforms, true, true);
-    const waveCompile = mat.onBeforeCompile;
-    const scale = { value: new THREE.Vector2(1 / ATLAS_COLS - 0.002, 1 / ATLAS_COLS - 0.002) };
-    mat.onBeforeCompile = (shader, r) => {
-      waveCompile.call(mat, shader, r);
-      shader.uniforms.uAtlasScale = scale;
-      shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec2 aAtlas;\nattribute float aMark;\nvarying float vMark;\nuniform vec2 uAtlasScale;")
-        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvMark = aMark;\n#ifdef USE_MAP\n  vMapUv = uv * uAtlasScale + aAtlas;\n#endif");
-      shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying float vMark;")
-        .replace("#include <map_fragment>", "")
-        .replace(
-          "#include <color_fragment>",
-          "vec4 atlasTexel = texture2D(map, vMapUv);\n#ifdef USE_COLOR\n  diffuseColor.rgb = mix(vColor.rgb, atlasTexel.rgb, atlasTexel.a * vMark);\n#else\n  diffuseColor.rgb = atlasTexel.rgb;\n#endif",
-        );
-    };
-    mat.customProgramCacheKey = () => "flag-wave-atlas";
-    return applyBacklight(mat, this.farUniforms, true);
+  // ---------- Hall flags ----------
+
+  /** The hall, once: a crag and a pole per slot, and a simulated cloth on each, flown for a few seconds. */
+  private buildHall() {
+    this.slots.forEach((p, i) => {
+      // Crags vary a little in size and height, as real rock does.
+      const k = 0.5 + 0.5 * Math.sin(phaseOf(i) * 3.1);
+      this.hall.add(this.standPole(p.x, p.z, POLE_H, HALL_POLE_R, HALL_ROCK.radius * (0.85 + 0.3 * k), HALL_ROCK.top - 0.25 * k, 11 + i, FLAG_H - 0.05));
+      const f = this.makeFlag(hallWind(i));
+      for (let t = 0; t < HALL_WARMUP; t += 1 / 60) f.cloth.update(1 / 60, f.geo);
+      f.mesh.userData.index = i;
+      this.hall.add(f.mesh);
+      this.flags.push(f);
+    });
   }
 
-  private drawPlaceholderTile() {
-    const [tw, th] = ATLAS_TILE;
-    const ctx = this.atlasCanvas.getContext("2d")!;
-    const col = TILE_PLACEHOLDER % ATLAS_COLS, row = Math.floor(TILE_PLACEHOLDER / ATLAS_COLS);
-    const x0 = col * tw, y0 = row * th;
-    ctx.save();
-    ctx.translate(x0, y0);
-    ctx.clearRect(0, 0, tw, th);
-    // A thin ring with a plus, like a logo mark, and the invitation under it. Warm grey ink on the cream cloth.
-    ctx.strokeStyle = "rgba(110,100,96,0.45)";
-    ctx.fillStyle = "rgba(110,100,96,0.45)";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(tw / 2, th * 0.42, th * 0.2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillRect(tw / 2 - 2.5, th * 0.42 - th * 0.1, 5, th * 0.2);
-    ctx.fillRect(tw / 2 - th * 0.1, th * 0.42 - 2.5, th * 0.2, 5);
-    ctx.font = "500 18px system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(110,100,96,0.5)";
-    ctx.fillText("tu startup acá", tw / 2, th * 0.83);
-    ctx.restore();
-    this.atlas.needsUpdate = true;
+  /** Paints slot i: the startup on it (its logo once loaded), or the empty pole's own design. */
+  private paintFlag(i: number) {
+    const f = this.flags[i];
+    if (!f) return;
+    const st = i < this.poled ? this.list[i] : null;
+    const logo = st ? this.logoFor(i) : null;
+    const key = st ? `${st.id}:${st.bgColor}:${logo ? "logo" : "color"}` : "empty";
+    if (f.painted === key) return;
+    const weave = clothFinish(f.canvas.width, f.canvas.height);
+    if (st) drawStartupFlag(f.canvas, { logo, bg: st.bgColor, weave });
+    else drawPlaceholderFlag(f.canvas, i, weave);
+    f.texture.needsUpdate = true;
+    f.painted = key;
   }
 
-  // ---------- Levels of detail ----------
-
-  private flagMatrix(i: number, m: THREE.Matrix4) {
-    const p = this.slots[i];
-    if (this.hidden.has(i)) return m.makeScale(0, 0, 0);
-    return m.makeTranslation(p.x + 0.06, POLE_H - 0.2 - this.riseDrop(i), p.z);
+  private placeFlag(i: number) {
+    const f = this.flags[i], p = this.slots[i];
+    if (f && p) f.mesh.position.set(p.x + HALL_POLE_R + 0.02, POLE_H - 0.2 - this.riseDrop(i), p.z);
   }
 
-  /** Mark strength for slot i at rest: startups 1 (their tile is the logo), front empty slots 1, the rest 0. */
-  private baseMark(i: number) {
-    return i < this.poled + FRONT_MARKS ? 1 : 0;
+  /** The visitor's own flag covers the claimed slot's cloth. */
+  private refreshFlags() {
+    this.flags.forEach((f, i) => (f.mesh.visible = !(this.claim && this.claim.slot === i)));
   }
 
-  /** Eases the hovered empty slot in (mark and a faint warm glow) and the previous one back out. */
+  /** Eases the hovered flag in (a faint warm glow) and the previous one back out. */
   private updateHover(dt: number) {
     if (this.hoverAt) {
       const hit = this.pointers.size === 0 && !this.flight ? this.pick(this.hoverAt) : null;
@@ -1115,18 +1051,14 @@ export class SalonScene {
       if (this.pointers.size === 0) this.renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       this.hoverAt = null;
     }
-    if (!this.hoverFade.size || !this.aMark || !this.aGlow) return;
+    if (!this.hoverFade.size) return;
     const k = 1 - Math.exp(-EASE_HOVER * dt);
     for (const [i, v] of this.hoverFade) {
       const goal = i === this.hovered ? 1 : 0;
       const nv = Math.abs(goal - v) < 0.002 ? goal : v + (goal - v) * k;
-      this.aMark.setX(i, Math.max(this.baseMark(i), nv));
-      this.aGlow.setX(i, nv * HOVER_GLOW);
       if (nv === 0) this.hoverFade.delete(i);
       else this.hoverFade.set(i, nv);
     }
-    this.aMark.needsUpdate = true;
-    this.aGlow.needsUpdate = true;
   }
 
   /** How far below its top position flag i is, while it rises. */
@@ -1138,90 +1070,9 @@ export class SalonScene {
     return (POLE_H + 1) * (1 - ease);
   }
 
-  private tileOffset(tile: number): [number, number] {
-    const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
-    return [col / ATLAS_COLS + 0.001, 1 - (row + 1) / ATLAS_COLS + 0.001];
-  }
-
-  /** Picks the near set and the atlas set: startup flags in view, closest first. Runs 4 times a second. */
+  /** Repaints hall flags whose logo has loaded since. Runs 4 times a second. */
   private updateLod() {
-    if (!this.far) return;
-    const t = TIERS[this.tier];
-    this.camera.updateMatrixWorld();
-    const frustum = new THREE.Frustum().setFromProjectionMatrix(
-      new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
-    );
-    const sphere = new THREE.Sphere(new THREE.Vector3(), 4);
-    const visible: { i: number; d: number }[] = [];
-    for (let i = 0; i < this.poled; i++) {
-      const p = this.slots[i];
-      sphere.center.set(p.x + FLAG_W / 2, POLE_H - FLAG_H / 2, p.z);
-      const d = sphere.center.distanceToSquared(this.pos);
-      if (d < t.lodRange * t.lodRange && frustum.intersectsSphere(sphere)) visible.push({ i, d });
-    }
-    visible.sort((a, b) => a.d - b.d);
-    const nearSet = new Set(visible.slice(0, t.near).map((v) => v.i));
-    const midSet = visible.slice(t.near, t.near + ATLAS_COLS * ATLAS_COLS - 2).map((v) => v.i);
-
-    for (const n of this.near) if (n.index >= 0 && !nearSet.has(n.index)) this.freeNear(n);
-    const held = new Set(this.near.filter((n) => n.index >= 0).map((n) => n.index));
-    for (const i of nearSet) {
-      if (held.has(i)) continue;
-      const n = this.near.find((x) => x.index < 0) ?? this.makeNear();
-      this.assignNear(n, i);
-    }
-
-    // Hidden: near flags (drawn by their own mesh), and on the low tier, everything past the range.
-    this.hidden = new Set(nearSet);
-    if (this.claim) this.hidden.add(this.claim.slot); // the visitor's own flag covers it
-    if (this.tier === "low") {
-      const r2 = t.lodRange * t.lodRange * 1.6;
-      for (let i = 0; i < this.slots.length; i++) {
-        const p = this.slots[i];
-        if ((p.x - this.pos.x) ** 2 + (p.z - this.pos.z) ** 2 > r2) this.hidden.add(i);
-      }
-    }
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < this.slots.length; i++) this.far.setMatrixAt(i, this.flagMatrix(i, m));
-    this.far.instanceMatrix.needsUpdate = true;
-
-    // Atlas: logos for the next closest flags.
-    const midKeep = new Set(midSet);
-    for (const [i] of this.atlasSlots) if (!midKeep.has(i)) this.atlasSlots.delete(i);
-    const used = new Set(this.atlasSlots.values());
-    const attr = this.aAtlas!;
-    for (let i = 0; i < this.poled; i++) {
-      const o = this.tileOffset(this.atlasSlots.get(i) ?? TILE_BLANK);
-      attr.setXY(i, o[0], o[1]);
-    }
-    for (const i of midSet) {
-      if (this.atlasSlots.has(i)) continue;
-      const img = this.logoFor(i);
-      if (!img) continue; // flat color until the logo loads
-      let tile = 2;
-      while (used.has(tile) && tile < ATLAS_COLS * ATLAS_COLS) tile++;
-      if (tile >= ATLAS_COLS * ATLAS_COLS) break;
-      used.add(tile);
-      this.atlasSlots.set(i, tile);
-      this.drawTile(tile, i, img);
-      const o = this.tileOffset(tile);
-      attr.setXY(i, o[0], o[1]);
-    }
-    attr.needsUpdate = true;
-    if (this.atlasDirty) {
-      this.atlas.needsUpdate = true;
-      this.atlasDirty = false;
-    }
-    for (const n of this.near) if (n.index >= 0 && n.painted !== "logo") this.paintNear(n);
-  }
-
-  private drawTile(tile: number, i: number, img: LogoImage) {
-    const [tw, th] = ATLAS_TILE;
-    const c = createCanvas(tw, th);
-    drawStartupFlag(c, { logo: img, bg: this.list[i].bgColor, weave: clothFinish(tw, th) });
-    const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
-    this.atlasCanvas.getContext("2d")!.drawImage(c, col * tw, row * th);
-    this.atlasDirty = true;
+    for (let i = 0; i < this.flags.length; i++) this.paintFlag(i);
   }
 
   /** The logo for flag i, or null while it loads. Starts the load on first ask. */
@@ -1248,57 +1099,33 @@ export class SalonScene {
     return null;
   }
 
-  private makeNear(): NearFlag {
-    const n = this.makeFlag();
-    this.near.push(n);
-    return n;
-  }
-
-  /** A cloth flag with its own canvas texture, added to the scene. */
-  private makeFlag(): NearFlag {
-    const canvas = createCanvas(512, 336);
+  /** A simulated cloth flag of light bunting with its own canvas texture. The caller adds it to the scene. */
+  private makeFlag(wind: WindLook): HallFlag {
+    const canvas = createCanvas(768, 496);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    const uniforms = { ...waveUniforms(FLAG_W, FLAG_H), ...this.backlight() };
+    texture.anisotropy = 8;
+    const uniforms = this.backlight();
+    uniforms.uBacklight.value = HALL_BACKLIGHT;
+    uniforms.uTransmit.value = HALL_TRANSMIT;
     const material = this.fabricMaterial(texture, uniforms);
+    applyRim(material, { uRimColor: { value: this.sunColor.clone().multiplyScalar(HALL_RIM) } });
     const [sx, sy] = TIERS[this.tier].cloth;
-    const mesh = new THREE.Mesh(flagGeometry(FLAG_W, FLAG_H, sx, sy), material);
+    const geo = flagGeometry(FLAG_W, FLAG_H, sx, sy);
+    // The cloth moves on the CPU; a sphere around its whole reach keeps picking from missing its fly end.
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(FLAG_W / 2, -FLAG_H / 2, 0), FLAG_W);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.frustumCulled = false;
-    this.scene.add(mesh);
-    return { mesh, material, texture, canvas, uniforms, index: -1, painted: "none" };
+    mesh.castShadow = true;
+    const cloth = new ClothSim(FLAG_W, FLAG_H, sx, sy, wind);
+    return { mesh, geo, material, texture, canvas, uniforms, cloth, painted: "" };
   }
 
   private backlight(): BacklightUniforms {
-    return { uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: BACKLIGHT }, uGlow: { value: 0 } };
-  }
-
-  private assignNear(n: NearFlag, i: number) {
-    n.index = i;
-    n.painted = "none";
-    n.uniforms.uPhase.value = phaseOf(i);
-    n.mesh.userData.index = i;
-    n.mesh.visible = this.showing < 0;
-    this.placeNear(n);
-    this.paintNear(n);
-  }
-
-  private placeNear(n: NearFlag) {
-    const p = this.slots[n.index];
-    n.mesh.position.set(p.x + 0.06, POLE_H - 0.2 - this.riseDrop(n.index), p.z);
-  }
-
-  private paintNear(n: NearFlag) {
-    const s = this.list[n.index];
-    const img = this.logoFor(n.index);
-    drawStartupFlag(n.canvas, { logo: img, bg: s.bgColor, weave: clothFinish(n.canvas.width, n.canvas.height) });
-    n.texture.needsUpdate = true;
-    n.painted = img ? "logo" : "color";
-  }
-
-  private freeNear(n: NearFlag) {
-    n.index = -1;
-    n.mesh.visible = false;
+    return {
+      uSunDir: { value: this.sunDir }, uSunColor: { value: this.sunColor }, uBacklight: { value: BACKLIGHT }, uGlow: { value: 0 },
+      uTransmit: { value: 0.35 },
+    };
   }
 
   // ---------- Quality ----------
@@ -1307,6 +1134,7 @@ export class SalonScene {
     this.tier = tier;
     const t = TIERS[tier];
     this.clouds.setSteps(t.steps);
+    this.sunLight.castShadow = t.shadows && this.renderer.shadowMap.enabled;
     this.lodTimer = 0;
   }
 
@@ -1375,7 +1203,6 @@ export class SalonScene {
     this.last = now;
     this.time += dt;
     this.watchFps(rawDt);
-    for (const u of [this.farUniforms, this.argUniforms, ...this.near.map((n) => n.uniforms)]) u.uTime.value = this.time;
 
     const speed = 10 * dt;
     if (this.keys.has("ArrowUp") || this.keys.has("w")) this.walk(speed);
@@ -1420,7 +1247,7 @@ export class SalonScene {
     }
 
     this.updateInset(dt);
-    this.updateClaim();
+    this.updateClaim(dt);
     this.camera.position.copy(this.pos); // the camera moves only with input, flights, and the intro
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
     this.camera.updateMatrixWorld();
@@ -1431,25 +1258,18 @@ export class SalonScene {
     if (this.argCloth && this.argGeo) this.argCloth.update(dt, this.argGeo);
     if (this.showing >= 0 && this.show?.cloth) this.show.cloth.update(dt, this.show.geo);
 
+    if (this.hall.visible) this.flags.forEach((f) => f.mesh.visible && f.cloth.update(dt, f.geo));
+
     // Rising flags and highlight pulse.
-    if (this.rising.size && this.far) {
-      const m = new THREE.Matrix4();
-      for (const [i, t0] of this.rising) {
-        this.far.setMatrixAt(i, this.flagMatrix(i, m));
-        if (this.time - t0 > 4) this.rising.delete(i);
-      }
-      this.far.instanceMatrix.needsUpdate = true;
-      for (const n of this.near) if (n.index >= 0) this.placeNear(n);
+    for (const [i, t0] of this.rising) {
+      this.placeFlag(i);
+      if (this.time - t0 > 4) this.rising.delete(i);
     }
     const pulse = 0.35 + 0.25 * Math.sin(this.time * 3.2);
-    if (this.highlight.size && this.aGlow) {
-      for (const i of this.highlight) this.aGlow.setX(i, pulse);
-      this.aGlow.needsUpdate = true;
-    }
-    for (const n of this.near) {
-      // Near flags are their own meshes: the highlight pulse wins, else the hover glow.
-      n.uniforms.uGlow.value = n.index < 0 ? 0 : this.highlight.has(n.index) ? pulse : (this.hoverFade.get(n.index) ?? 0) * HOVER_GLOW;
-    }
+    this.flags.forEach((f, i) => {
+      // The highlight pulse wins, else the hover glow.
+      f.uniforms.uGlow.value = this.highlight.has(i) ? pulse : (this.hoverFade.get(i) ?? 0) * HOVER_GLOW;
+    });
     this.updateHover(dt);
 
     this.lodTimer -= dt;
@@ -1500,11 +1320,14 @@ export class SalonScene {
       const hit = this.show && this.raycaster.intersectObject(this.show.mesh, false)[0];
       return hit ? { kind: "startup", index: this.showing } : null;
     }
-    const targets: THREE.Object3D[] = this.near.filter((n) => n.index >= 0).map((n) => n.mesh);
-    if (this.far) targets.push(this.far);
+    const targets: THREE.Object3D[] = this.hall.visible ? this.flags.filter((f) => f.mesh.visible).map((f) => f.mesh) : [];
+    if (this.claim?.flag.mesh.visible) {
+      this.claim.flag.mesh.userData.index = this.claim.slot;
+      targets.push(this.claim.flag.mesh);
+    }
     const hit = this.raycaster.intersectObjects(targets, false)[0];
     if (!hit) return null;
-    const index = hit.object === this.far ? hit.instanceId ?? -1 : (hit.object.userData.index as number);
+    const index = hit.object.userData.index as number;
     if (index < 0) return null;
     return { kind: index < this.poled ? "startup" : "placeholder", index };
   }

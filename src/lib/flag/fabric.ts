@@ -59,6 +59,8 @@ export interface BacklightUniforms {
   uSunColor: { value: THREE.Color };
   uBacklight: { value: number };
   uGlow: { value: number };
+  /** Share of the sun the cloth lets through: about 0.35 for flag fabric, less for a denser weave. */
+  uTransmit: { value: number };
 }
 
 /**
@@ -84,7 +86,7 @@ export function applyBacklight<M extends THREE.Material>(material: M, uniforms: 
 ${shader.fragmentShader.includes("uniform vec3 uSunDir;") ? "" : "uniform vec3 uSunDir;\nuniform vec3 uSunColor;"}
 uniform float uBacklight;
 uniform float uGlow;
-const float CLOTH_TRANSMIT = 0.35; // share of the sun a thin flag fabric lets through
+uniform float uTransmit;
 ${SUN_GLOW_GLSL}
 ${instanced ? "varying float vGlow;" : ""}`,
       )
@@ -103,10 +105,10 @@ ${instanced ? "varying float vGlow;" : ""}`,
   totalEmissiveRadiance += diffuseColor.rgb * uSunColor * uBacklight * thru * (pow(back, 3.0) * 0.6 + pow(back, 6.0) * 1.4);
   // The sun right behind the cloth shines through it in the cloth's own colors, deeper than the surface
   // (light crosses the dye). Thin cloth passes only part of the light behind it, so the spot is the sun as
-  // the sky draws it, times CLOTH_TRANSMIT: it never outshines the bare sun beside the flag. (A fixed hot
+  // the sky draws it, times uTransmit: it never outshines the bare sun beside the flag. (A fixed hot
   // spot did, about 5x, and the sun looked stronger through the cloth than in the open sky.)
   vec3 dyed = diffuseColor.rgb * sqrt(diffuseColor.rgb);
-  totalEmissiveRadiance += dyed * uSunColor * CLOTH_TRANSMIT * thru * sunGlow(back);
+  totalEmissiveRadiance += dyed * uSunColor * uTransmit * thru * sunGlow(back);
   // Gold rim: edges and fold crests seen at a grazing angle catch the light behind them, in the sun's color.
   float edgeRim = pow(1.0 - abs(dot(normal, viewDirV)), 3.0);
   totalEmissiveRadiance += uSunColor * uBacklight * 0.5 * edgeRim * pow(back, 4.0);

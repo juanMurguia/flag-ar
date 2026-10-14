@@ -79,10 +79,70 @@ export function drawStartupFlag(canvas: HTMLCanvasElement, opts: StartupFlagOpti
     const boxW = canvas.width * (1 - 2 * LOGO_MARGIN), boxH = canvas.height * (1 - 2 * LOGO_MARGIN);
     const k = Math.min(boxW / img.width, boxH / img.height);
     const dw = img.width * k, dh = img.height * k;
+    ctx.save();
     ctx.imageSmoothingQuality = "high";
+    // Printed, not pasted: the ink bleeds a hair into the threads and lets a little of the dyed cloth through.
+    ctx.filter = `blur(${Math.max(0.4, canvas.width / 1400)}px)`;
+    ctx.globalAlpha = 0.94;
     ctx.drawImage(img, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+    ctx.restore();
   }
   applyWeave(canvas, opts.weave);
+}
+
+/** Clean two-color designs for the empty poles: each pole gets its own, so no two flags in the row match. */
+const PLACEHOLDER_DESIGNS = [
+  { bg: "#1f3a5f", accent: "#2c5282", ink: "#f4efe6", style: "solid" },
+  { bg: "#9e3f2c", accent: "#efe3d0", ink: "#fbf5ec", style: "hoist" },
+  { bg: "#256d5f", accent: "#2f8573", ink: "#f4efe6", style: "diagonal" },
+  { bg: "#f3ede2", accent: "#2b2a33", ink: "#2b2a33", style: "band" },
+  { bg: "#6b3f8f", accent: "#7f52a6", ink: "#f6f0fa", style: "diagonal" },
+  { bg: "#d9a441", accent: "#1f2a36", ink: "#1f2a36", style: "hoist" },
+] as const;
+
+/** An empty pole's flag: design `n` (cycled), with a "tu startup acá" mark printed in the middle. */
+export function drawPlaceholderFlag(canvas: HTMLCanvasElement, n: number, weave?: HTMLCanvasElement | null): void {
+  const d = PLACEHOLDER_DESIGNS[((n % PLACEHOLDER_DESIGNS.length) + PLACEHOLDER_DESIGNS.length) % PLACEHOLDER_DESIGNS.length];
+  withLayout(canvas, (ctx) => {
+    ctx.fillStyle = d.bg;
+    ctx.fillRect(0, 0, LAYOUT_W, LAYOUT_H);
+    ctx.fillStyle = d.accent;
+    if (d.style === "hoist") ctx.fillRect(0, 0, LAYOUT_W * 0.2, LAYOUT_H);
+    else if (d.style === "band") ctx.fillRect(0, LAYOUT_H * 0.8, LAYOUT_W, LAYOUT_H * 0.2);
+    else if (d.style === "diagonal") {
+      ctx.beginPath();
+      ctx.moveTo(LAYOUT_W, 0);
+      ctx.lineTo(LAYOUT_W, LAYOUT_H);
+      ctx.lineTo(LAYOUT_W * 0.35, LAYOUT_H);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // The mark sits in the open field, clear of the hoist stripe and the band.
+    const cx = d.style === "hoist" ? LAYOUT_W * 0.6 : LAYOUT_W / 2;
+    const cy = d.style === "band" ? LAYOUT_H * 0.38 : LAYOUT_H * 0.42;
+    const r = LAYOUT_H * 0.15;
+    ctx.save();
+    ctx.filter = "blur(1.2px)"; // ink in the weave, not a vector edge
+    ctx.globalAlpha = 0.92;
+    ctx.strokeStyle = ctx.fillStyle = d.ink;
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.5, cy);
+    ctx.lineTo(cx + r * 0.5, cy);
+    ctx.moveTo(cx, cy - r * 0.5);
+    ctx.lineTo(cx, cy + r * 0.5);
+    ctx.stroke();
+    ctx.font = "600 74px system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("tu startup acá", cx, cy + r + 96);
+    ctx.restore();
+  });
+  applyWeave(canvas, weave);
 }
 
 /** Longest side of a prepared logo, in pixels. */
@@ -291,8 +351,8 @@ export function buildWeave(width: number, height: number) {
 const finishes = new Map<string, HTMLCanvasElement>();
 
 /**
- * Gray multiply overlay that makes a printed canvas read as sewn cloth: the weave, an uneven dye
- * (large soft blotches, a few percent), and a hem with its stitch line on every edge. One per size, cached.
+ * Gray multiply overlay that makes a printed canvas read as sewn cloth: the weave, and a hem with its
+ * stitch line on every edge. No dye blotches: lit by a low sun they read as dirt. One per size, cached.
  */
 export function clothFinish(width: number, height: number): HTMLCanvasElement {
   const key = `${width}x${height}`;
@@ -302,17 +362,6 @@ export function clothFinish(width: number, height: number): HTMLCanvasElement {
   const ctx = c.getContext("2d")!;
   ctx.save();
   ctx.globalCompositeOperation = "multiply";
-  // Uneven dye: real cloth is never one flat color. Darken only, so white stays near white.
-  const rand = mulberry32(906);
-  for (let i = 0; i < 9; i++) {
-    const x = rand() * width, y = rand() * height, r = (0.25 + rand() * 0.35) * width;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    const k = Math.round(255 * (0.972 + rand() * 0.014)); // faint: stronger reads as stains on white
-    g.addColorStop(0, `rgb(${k},${k},${k})`);
-    g.addColorStop(1, "rgb(255,255,255)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
-  }
   // Hem: a folded double layer, a little darker, with a stitch line along its inner edge. The hoist hem is wider.
   const hem = Math.max(2, Math.round(height * 0.022));
   const hoist = hem * 2;

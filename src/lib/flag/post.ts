@@ -225,7 +225,7 @@ export class Post {
     }
     if (this.fx.godRays) {
       effects.push(new GodRaysEffect(this.camera, this.sun, {
-        density: 0.96, decay: 0.93, weight: 0.45, exposure: 0.6, samples: 60, clampMax: 1, kernelSize: KernelSize.SMALL, blur: true,
+        density: 0.97, decay: 0.94, weight: 0.55, exposure: 0.65, samples: 60, clampMax: 1, kernelSize: KernelSize.SMALL, blur: true,
       }));
     }
     // Always on, in every quality: without it the low-quality sun is a bare disc of sky glow.

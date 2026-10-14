@@ -196,6 +196,8 @@ void main() {
   float dist = t0 + tDepth;
 
   vec3 col = applyHaze(acc, rd, dist);
+  // Aerial mist over the sea: near billows keep their crisp edges, far ones soften into the sky's own haze.
+  col = mix(col, hazeColor(rd), smoothstep(60.0, 900.0, dist) * 0.35);
   vec4 clip = projectionMatrix * viewMatrix * vec4(pd, 1.0);
   gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
   gl_FragColor = vec4(col, 1.0);
@@ -224,9 +226,10 @@ export class CloudSea {
         uniforms: {
           uNoise: { value: noiseTexture() }, uBillow: { value: billowTexture3D() }, uSkin: { value: 2.5 },
           uTime: this.time, uTop: { value: CLOUD_TOP }, uBottom: { value: CLOUD_BOTTOM },
-          // Soft lavender shade (light, as clouds read: dark ones look like a storm), amber on the tops toward the sun.
-          uDeep: { value: new THREE.Vector3(0.16, 0.15, 0.24) },
-          uMid: { value: new THREE.Vector3(0.42, 0.38, 0.48) },
+          // Soft rose-mauve shade, the sky's low colors in shadow (light, as clouds read: dark ones look like a
+          // storm), amber on the tops toward the sun. A cool lavender looked pasted under the gold sky.
+          uDeep: { value: new THREE.Vector3(0.2, 0.15, 0.2) },
+          uMid: { value: new THREE.Vector3(0.5, 0.4, 0.43) },
           uLit: { value: new THREE.Vector3(1.5, 0.78, 0.32) },
           ...shadeUniforms(look),
         },
