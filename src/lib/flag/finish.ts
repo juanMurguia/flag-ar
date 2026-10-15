@@ -42,14 +42,16 @@ export const FINISH_DEFAULTS: Required<Omit<FinishOptions, "sun">> = {
   vignette: 0.3,
   grain: 4.5,
   aberration: 0.0016,
-  halation: 0.4,
-  halationThreshold: 0.72,
+  // Tuned at 1:1 on the backlit Argentine flag: more leak, halation or streak than this blows its white
+  // stripe to flat cream and turns its blue milky; more tone pushes the celeste toward teal.
+  halation: 0.28,
+  halationThreshold: 0.8,
   diffusion: 0.1,
   contrast: 0.5,
-  tone: 0.75,
-  leak: 0.12,
-  vibrance: 0.18,
-  streak: 0.22,
+  tone: 0.5,
+  leak: 0.08,
+  vibrance: 0.25,
+  streak: 0.14,
 };
 
 /** Applies the finish in place to a 2D canvas of `w` x `h`. */
@@ -123,9 +125,10 @@ export function applyFinish(ctx: CanvasRenderingContext2D, w: number, h: number,
         b += hl * o.halation * 0.12;
       }
 
-      // Grade: S-curve per channel, then split-tone by luminance.
+      // Grade: a soft shoulder first, so the light added above rolls off instead of clipping a backlit cloth
+      // to flat cream. Then an S-curve per channel, then split-tone by luminance.
       const c = o.contrast;
-      r = clamp01(r); g = clamp01(g); b = clamp01(b);
+      r = shoulder(r); g = shoulder(g); b = shoulder(b);
       r += c * (r * r * (3 - 2 * r) - r);
       g += c * (g * g * (3 - 2 * g) - g);
       b += c * (b * b * (3 - 2 * b) - b);
@@ -170,8 +173,11 @@ export function applyFinish(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.putImageData(img, 0, 0);
 }
 
-function clamp01(x: number) {
-  return x < 0 ? 0 : x > 1 ? 1 : x;
+/** Linear up to 0.75, then an exponential roll-off that reaches 1 only at infinity. */
+function shoulder(x: number) {
+  if (x < 0) return 0;
+  if (x <= 0.75) return x;
+  return 0.75 + 0.25 * (1 - Math.exp(-(x - 0.75) / 0.25));
 }
 
 /** Bilinear read of one channel. */
