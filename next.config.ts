@@ -40,6 +40,18 @@ const config: NextConfig = {
   poweredByHeader: false,
   // TensorFlow.js (NSFW check) is large and loads its own modules at run time: keep it out of the bundle.
   serverExternalPackages: ["@tensorflow/tfjs", "nsfwjs"],
+  // Vercel keeps every deployment's functions, so their size adds up. Drop what the server never loads:
+  // source maps, the browser builds, and the two nsfwjs models we do not use.
+  // Keep tfjs-backend-webgl: tfjs requires it at load time, even on the CPU backend.
+  outputFileTracingExcludes: {
+    "*": [
+      "node_modules/@tensorflow/**/*.map",
+      "node_modules/@tensorflow/tfjs/dist/miniprogram/**",
+      "node_modules/nsfwjs/dist/browser/**",
+      "node_modules/nsfwjs/dist/models/inception_v3/**",
+      "node_modules/nsfwjs/dist/models/mobilenet_v2_mid/**",
+    ],
+  },
   // A parent folder has its own lockfile. Pin the root so Next.js does not pick it.
   outputFileTracingRoot: import.meta.dirname,
   turbopack: { root: import.meta.dirname },

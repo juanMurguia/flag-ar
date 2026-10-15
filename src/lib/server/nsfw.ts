@@ -8,9 +8,14 @@ import sharp from "sharp";
 type Model = { classify(img: unknown, topk?: number): Promise<{ className: string; probability: number }[]> };
 let model: Promise<Model> | null = null;
 
+// Import only the MobileNetV2 model. The "nsfwjs" entry point pulls in all three models (38 MB),
+// and every function that imports this file ships them.
 async function load(): Promise<Model> {
-  const nsfw = await import("nsfwjs");
-  return (await nsfw.load("MobileNetV2")) as unknown as Model;
+  const [{ load }, { MobileNetV2Model }] = await Promise.all([
+    import("nsfwjs/core"),
+    import("nsfwjs/models/mobilenet_v2"),
+  ]);
+  return (await load("MobileNetV2", { modelDefinitions: [MobileNetV2Model] })) as unknown as Model;
 }
 
 /** Thresholds per class. A logo is a drawing, so "Hentai" needs a higher bar than "Porn". */
