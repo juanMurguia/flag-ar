@@ -519,11 +519,11 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
               </button>
               {stops > 1 && <CardNav at={(all.findIndex((x) => x.id === shown.id) + 1) || null} of={stops} step={step} />}
             </div>
-            <CardDetails startup={shown}>
+            <div className="salon-card-actions">
               <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
                 {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
               </button>
-            </CardDetails>
+            </div>
           </div>
         </aside>
       )}
@@ -620,16 +620,6 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
 
 const RANK_SIZE = 10;
 const RANK_FOLDED = 3;
-
-/** The card's actions: the wallpaper and a change request. */
-function CardDetails({ startup, children }: { startup: PublicStartup; children: React.ReactNode }) {
-  return (
-    <div className="salon-card-actions">
-      {children}
-      <Link className="text-link" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
-    </div>
-  );
-}
 
 /** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
 /** The tour's arrows inside a card: previous, "2 / 4", next. */
