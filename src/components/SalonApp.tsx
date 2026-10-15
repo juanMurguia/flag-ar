@@ -9,7 +9,6 @@ import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
 import { ShareButtons, xIntent } from "./Share";
-import { ReportForm } from "./StartupView";
 import Icon from "./Icon";
 import { useLikes } from "./useLikes";
 
@@ -622,25 +621,21 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
 const RANK_SIZE = 10;
 const RANK_FOLDED = 3;
 
-/** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
-/** The tour's arrows inside a card: previous, "2 / 4", next. */
-/** Everything the flag's own page had: share, the wallpaper, a change request, and report. Keyed with the card
-    body, so the report form closes when another flag is picked. */
+/** The flag's data that used to live on its own page: share links, the wallpaper, and a change request. */
 function CardDetails({ startup, children }: { startup: PublicStartup; children: React.ReactNode }) {
-  const [report, setReport] = useState(false);
   return (
     <>
       <ShareButtons name={startup.name} order={startup.order} url={`${SITE}/${startup.slug}`} />
       <div className="salon-card-actions">
         {children}
         <Link className="text-link" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
-        <button type="button" className="text-link" aria-expanded={report} onClick={() => setReport(!report)}>Reportar</button>
       </div>
-      {report && <div className="reveal"><ReportForm id={startup.id} /></div>}
     </>
   );
 }
 
+/** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
+/** The tour's arrows inside a card: previous, "2 / 4", next. */
 function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 | -1) => void }) {
   return (
     <div className="salon-card-nav">

@@ -90,7 +90,7 @@ export default function StartupView({ startup }: { startup: PublicStartup }) {
   );
 }
 
-export function ReportForm({ id }: { id: string }) {
+function ReportForm({ id }: { id: string }) {
   const [reason, setReason] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
