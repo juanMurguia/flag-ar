@@ -17,6 +17,8 @@ import {
 } from "postprocessing";
 import { N8AOPostPass } from "n8ao";
 
+const NOISE_OPACITY = 0.035;
+
 /** Scales the HDR image before tone mapping. postprocessing has no exposure control for its tone mappers. */
 class ExposureEffect extends Effect {
   constructor(exposure: THREE.Uniform<number>) {
@@ -152,6 +154,9 @@ export class Post {
   private size = { w: 1, h: 1 };
   private backdrop: Backdrop;
   private backdropScale: number;
+  private noise: NoiseEffect;
+  /** Still mode: a single exported frame. Every pass at its best quality, whatever it costs. */
+  private still = false;
   readonly exposure = new THREE.Uniform(0.38);
   readonly saturation = new HueSaturationEffect({ saturation: 0.28 });
   private glare = new Map<string, THREE.Uniform>([
@@ -177,7 +182,8 @@ export class Post {
     this.composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType });
     this.composer.addPass(new RenderPass(scene, camera));
     const noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
-    noise.blendMode.opacity.value = 0.035;
+    noise.blendMode.opacity.value = NOISE_OPACITY;
+    this.noise = noise;
     this.ldrPass = new EffectPass(
       camera,
       new SMAAEffect({ preset: SMAAPreset.HIGH }),
@@ -195,6 +201,17 @@ export class Post {
     this.build();
   }
 
+  /**
+   * Still mode for a downloaded frame: full-resolution AO at its top quality, more god-ray samples, and no
+   * live noise (the still is averaged over jittered frames, then gets its own grain).
+   */
+  setStill(still: boolean) {
+    if (still === this.still) return;
+    this.still = still;
+    this.noise.blendMode.opacity.value = still ? 0 : NOISE_OPACITY;
+    this.build();
+  }
+
   /** Rebuilds every pass after the RenderPass. Cheap: it runs only when a toggle changes. */
   private build() {
     for (const p of [this.ao, this.hdrPass, this.ldrPass]) if (p) this.composer.removePass(p);
@@ -209,9 +226,9 @@ export class Post {
       ao.configuration.aoRadius = 0.35;
       ao.configuration.distanceFalloff = 0.5;
       ao.configuration.intensity = 1.5;
-      ao.configuration.halfRes = true; // depth-aware upsampling keeps edges clean at a quarter of the cost
+      ao.configuration.halfRes = !this.still; // depth-aware upsampling keeps edges clean at a quarter of the cost
       ao.configuration.gammaCorrection = false; // HDR, linear: tone mapping comes later
-      ao.setQualityMode("Medium");
+      ao.setQualityMode(this.still ? "Ultra" : "Medium");
       this.ao = ao;
       this.composer.addPass(ao);
     }
@@ -225,7 +242,9 @@ export class Post {
     }
     if (this.fx.godRays) {
       effects.push(new GodRaysEffect(this.camera, this.sun, {
-        density: 0.97, decay: 0.94, weight: 0.55, exposure: 0.65, samples: 60, clampMax: 1, kernelSize: KernelSize.SMALL, blur: true,
+        density: 0.97, decay: 0.94, weight: 0.55, exposure: 0.65, clampMax: 1, blur: true,
+        samples: this.still ? 120 : 60,
+        kernelSize: this.still ? KernelSize.MEDIUM : KernelSize.SMALL,
       }));
     }
     // Always on, in every quality: without it the low-quality sun is a bare disc of sky glow.

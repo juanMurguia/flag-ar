@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import type { PublicStartup } from "@/lib/startups/model";
 import { Birds } from "./birds";
+import { FrameAverage, applyFinish, canvasToBlob } from "./finish";
 import { ClothSim, type WindLook } from "./cloth";
 import { CLOUD_TOP, CloudSea } from "./cloudSea";
 import { CLOTH_NORMAL_REPEAT, applyBacklight, applyRim, applySunRim, clothNormalMap, type BacklightUniforms } from "./fabric";
@@ -108,6 +109,20 @@ const EASE_HOVER = 7; // 1/s
 // Sky and cloud sea resolution, per axis, against the drawing buffer. Both are soft: half resolution measured
 // 45 dB PSNR against full (no visible change) and cut the frame time by a third on an integrated GPU.
 const BACKDROP_SCALE = 0.5;
+
+// Wallpaper still: jittered frames averaged (16 is where the edges stop changing), and cloud ray-march steps.
+const STILL_SAMPLES = 16;
+const STILL_CLOUD_STEPS = 128;
+
+/** Low-discrepancy sequence in [0, 1): sub-pixel offsets that cover the pixel evenly. */
+function halton(i: number, base: number) {
+  let f = 1, r = 0;
+  for (; i > 0; i = Math.floor(i / base)) {
+    f /= base;
+    r += f * (i % base);
+  }
+  return r;
+}
 
 type Tier = "high" | "low";
 const TIERS = {
@@ -876,16 +891,43 @@ export class SalonScene {
     this.camera.updateMatrixWorld();
     this.sky.update(this.time, this.camera);
     this.clouds.update(this.time, this.camera);
+    // A still has no frame budget: every effect on at its top quality, whatever the visitor picked.
+    this.post.setFx({ ao: true, bloom: true, godRays: true });
+    this.post.setStill(true);
+    this.clouds.setSteps(STILL_CLOUD_STEPS);
+    const shadow = this.sunLight.shadow;
+    if (this.sunLight.castShadow) {
+      shadow.mapSize.set(4096, 4096);
+      shadow.map?.dispose();
+      shadow.map = null; // three builds a new one at the new size
+    }
     try {
-      this.post.render(1 / 60);
-      const blob = await new Promise<Blob | null>((res) => this.renderer.domElement.toBlob(res, "image/jpeg", 0.95));
-      if (!blob) throw new Error("No se pudo generar la imagen.");
-      return blob;
+      // Supersampling: the same frame many times, the camera shifted by a fraction of a pixel each time,
+      // then averaged. Thin poles, cloth edges and the sun's rim come out clean, at no extra GPU memory.
+      const avg = new FrameAverage(width, height);
+      for (let s = 0; s < STILL_SAMPLES; s++) {
+        const jx = halton(s + 1, 2) - 0.5, jy = halton(s + 1, 3) - 0.5;
+        this.camera.setViewOffset(width, height, jx, jy, width, height);
+        this.post.render(1 / 60);
+        avg.add(this.renderer.domElement); // same task as the render: WebGL drops the buffer after
+        await new Promise((r) => setTimeout(r)); // let the page breathe between samples
+      }
+      // Finish it like a print: vignette and grain.
+      applyFinish(avg.resolve(), width, height);
+      return await canvasToBlob(avg.canvas, "image/jpeg", 0.95);
     } finally {
+      this.camera.clearViewOffset();
+      if (this.sunLight.castShadow) {
+        shadow.mapSize.set(2048, 2048);
+        shadow.map?.dispose();
+        shadow.map = null;
+      }
+      this.post.setStill(false);
+      this.post.setFx(this.fx);
       if (prevShowing < 0) this.leaveShowcase();
       else if (prevShowing !== i) this.enterShowcase(prevShowing, false);
       this.renderer.setPixelRatio(prevDpr);
-      if (prevTier !== "high") this.applyTier(prevTier);
+      this.applyTier(prevTier); // also puts the cloud steps back
       this.post.setBackdropScale(BACKDROP_SCALE);
       this.post.setSize(size.x, size.y);
       this.resize();
