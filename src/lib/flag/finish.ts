@@ -66,7 +66,7 @@ export function applyFinish(ctx: CanvasRenderingContext2D, w: number, h: number,
   // (a sun hidden behind a flag throws a weaker one).
   const sunHot = Math.min(1, (halo.at(sun.x, sun.y, 0) + halo.at(sun.x, sun.y, 1)) * 1.5);
   const streakK = o.streak * sunHot;
-  const thin = 1 / (0.0035 * h), soft = 1 / (0.022 * h), far = 1 / (0.42 * w);
+  const thin = 1 / (0.0035 * h), soft = 1 / (0.022 * h), far = 1 / (0.16 * w); // a short streak: across the whole frame it read as a scan line
 
   const img = ctx.getImageData(0, 0, w, h);
   const src = img.data.slice();

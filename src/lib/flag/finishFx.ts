@@ -7,10 +7,11 @@
 // It runs last, on the tone-mapped image. The buffers are linear; the finish was tuned on sRGB pixels, so
 // the shader works in sRGB and converts back at the end.
 import * as THREE from "three";
-import { Effect, MipmapBlurPass } from "postprocessing";
+import { Effect, EffectAttribute, MipmapBlurPass } from "postprocessing";
 import { FINISH_DEFAULTS } from "./finish";
 
 const FRAG = /* glsl */ `
+#define STREAK_LENGTH 0.16
 uniform sampler2D tMist;
 uniform vec2 uSun;
 uniform float uSunOn;
@@ -48,10 +49,17 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   col = 1.0 - (1.0 - col) * (1.0 - mist * uDiffusion);
   float sunMist = max(texture2D(tMist, uSun).r, texture2D(tMist, uSun).g);
   float sunHot = clamp((pow(sunMist, 1.0 / 2.2) - uHalationThreshold) / (1.0 - uHalationThreshold) * 3.0, 0.0, 1.0) * uSunOn;
+  // A real streak needs the sun's own disc in view: behind a flag or a pole there is none. Five depth reads
+  // around the sun, as the glare does; sky depth (1.0) means a clear view.
+  vec2 o = vec2(0.006 / uAspect, 0.006);
+  float vis = (step(0.9999, readDepth(uSun)) + step(0.9999, readDepth(uSun + vec2(o.x, 0.0)))
+    + step(0.9999, readDepth(uSun - vec2(o.x, 0.0))) + step(0.9999, readDepth(uSun + vec2(0.0, o.y)))
+    + step(0.9999, readDepth(uSun - vec2(0.0, o.y)))) / 5.0;
+  sunHot *= vis * vis;
   if (uStreak * sunHot > 0.0) {
     float dy = uv.y - uSun.y, dx = abs(uv.x - uSun.x) * uAspect;
     float t1 = dy / 0.0035, t2 = dy / 0.022;
-    float s = (exp(-t1 * t1) + 0.25 * exp(-t2 * t2)) * exp(-dx / (0.42 * uAspect)) * uStreak * sunHot;
+    float s = (exp(-t1 * t1) + 0.25 * exp(-t2 * t2)) * exp(-dx / (STREAK_LENGTH * uAspect)) * uStreak * sunHot;
     col += s * vec3(1.0, 0.72, 0.5);
   }
   float around = max(0.0, (max(mist.r, mist.g) - uHalationThreshold) / (1.0 - uHalationThreshold));
@@ -97,6 +105,7 @@ export class FilmFinishEffect extends Effect {
   constructor() {
     const d = FINISH_DEFAULTS;
     super("FilmFinishEffect", FRAG, {
+      attributes: EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
         ["tMist", new THREE.Uniform(null)],
         ["uSun", new THREE.Uniform(new THREE.Vector2(0.5, 0.65))],

@@ -126,8 +126,9 @@ function halton(i: number, base: number) {
   return r;
 }
 
-const SCREEN_CENTER = new THREE.Vector2(0, 0);
 const FOCUS_DIR = new THREE.Vector3();
+const FOCUS_P = new THREE.Vector3();
+const FOCUS_NDC = new THREE.Vector3();
 
 type Tier = "high" | "low";
 const TIERS = {
@@ -275,6 +276,7 @@ export class SalonScene {
   private liveFocus: StillFocus = { target: ARG_CENTER.clone(), range: 40, bokeh: 6 };
   private focusGoal = ARG_CENTER.clone();
   private focusTick = 0;
+  private focusRangeGoal = 40;
   private images = new Map<string, LogoImage | "loading" | "error">();
   private lodTimer = 0;
   private knownIds: Set<string> | null = null;
@@ -1263,29 +1265,49 @@ export class SalonScene {
 
   /**
    * Cinema mode's autofocus, like a camera operator pulling focus. The subject: the showcase pair, else
-   * the flag under the mouse, else the flag at the middle of the view (a ray, five times a second), else a
-   * point as far as the Argentine flag. The focus eases to it over about half a second.
+   * the flag under the mouse, else the hall's flags from the nearest one back to the Argentine flag (checked
+   * five times a second). The focus eases to it over about half a second.
    */
   private updateFocus(dt: number) {
     if (!this.fx.cinema) return;
+    const cam = this.camera.position;
     if (this.showing >= 0) {
       this.focusGoal.copy(this.showcaseView(this.camera.aspect).look);
+      this.focusRangeGoal = cam.distanceTo(this.focusGoal) * STILL_FOCUS_RANGE;
     } else if (this.hovered >= 0 && this.flags[this.hovered]?.mesh.visible) {
       this.flags[this.hovered].mesh.getWorldPosition(this.focusGoal);
+      this.focusRangeGoal = cam.distanceTo(this.focusGoal) * STILL_FOCUS_RANGE;
     } else if (--this.focusTick <= 0) {
       this.focusTick = 12;
-      this.raycaster.setFromCamera(SCREEN_CENTER, this.camera);
-      const targets: THREE.Object3D[] = this.hall.visible ? this.flags.filter((f) => f.mesh.visible).map((f) => f.mesh) : [];
-      if (this.argFlag) targets.push(this.argFlag);
-      const hit = this.raycaster.intersectObjects(targets, false)[0];
-      if (hit) this.focusGoal.copy(hit.point);
-      else {
-        const d = this.camera.position.distanceTo(ARG_CENTER);
-        this.focusGoal.copy(this.camera.position).addScaledVector(this.camera.getWorldDirection(FOCUS_DIR), d);
+      // The hall: the startups are the subject, not the hero behind them. Focus on the nearest flag in view
+      // and keep everything from it back to the Argentine flag sharp; only the sky, the far clouds and the
+      // rocks right in front of the lens go soft. (Focusing on the middle of the view picked the hero, and
+      // left every startup flag blurred.)
+      let near: THREE.Vector3 | null = null, nd = Infinity;
+      if (this.hall.visible) {
+        for (const f of this.flags) {
+          if (!f.mesh.visible) continue;
+          f.mesh.getWorldPosition(FOCUS_P);
+          const d = cam.distanceTo(FOCUS_P);
+          FOCUS_NDC.copy(FOCUS_P).project(this.camera);
+          if (FOCUS_NDC.z < 1 && Math.abs(FOCUS_NDC.x) < 1 && Math.abs(FOCUS_NDC.y) < 1 && d < nd) {
+            nd = d;
+            near = (near ?? new THREE.Vector3()).copy(FOCUS_P);
+          }
+        }
+      }
+      const da = cam.distanceTo(ARG_CENTER);
+      if (near) {
+        this.focusGoal.copy(near).lerp(ARG_CENTER, 0.35);
+        this.focusRangeGoal = Math.max(nd * STILL_FOCUS_RANGE, (da - nd) * 1.6);
+      } else {
+        this.focusGoal.copy(cam).addScaledVector(this.camera.getWorldDirection(FOCUS_DIR), da);
+        this.focusRangeGoal = da * STILL_FOCUS_RANGE;
       }
     }
-    this.liveFocus.target.lerp(this.focusGoal, 1 - Math.exp(-5 * dt));
-    this.liveFocus.range = this.camera.position.distanceTo(this.liveFocus.target) * STILL_FOCUS_RANGE;
+    const k = 1 - Math.exp(-5 * dt);
+    this.liveFocus.target.lerp(this.focusGoal, k);
+    this.liveFocus.range += (this.focusRangeGoal - this.liveFocus.range) * k;
     // Bokeh is in pixels: scale the wallpaper's 16 at 2160 rows to this canvas.
     this.liveFocus.bokeh = (STILL_BOKEH * this.renderer.domElement.height) / 2160;
   }
