@@ -5,6 +5,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
 // @imgly/background-removal loads its ONNX model and WASM runtime from IMG.LY's CDN, on first use only.
 const IMGLY = "https://staticimgly.com";
+// unavatar.io finds a logo from the startup's link (X avatar or website icon). The browser calls it directly.
+const UNAVATAR = "https://unavatar.io";
 
 function csp(extra: { connect?: string; img?: string } = {}) {
   return [
@@ -14,7 +16,7 @@ function csp(extra: { connect?: string; img?: string } = {}) {
     `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' ${IMGLY}${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${extra.img ?? ""}`.trim(),
-    `connect-src 'self' ${IMGLY} ${extra.connect ?? ""}${isDev ? " ws:" : ""}`.trim(),
+    `connect-src 'self' ${IMGLY} ${UNAVATAR} ${extra.connect ?? ""}${isDev ? " ws:" : ""}`.trim(),
     "frame-src 'none'",
     "worker-src 'self' blob:",
     "font-src 'self'",

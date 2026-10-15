@@ -1,6 +1,6 @@
 // Logo upload, in the browser: decode (PNG, JPG, WebP, SVG), remove the background, trim, pick the
 // default flag color, and export the PNG the server stores. The server re-encodes it again.
-import { rgbToHex } from "@/lib/startups/model";
+import { normalizeStartupLink, rgbToHex } from "@/lib/startups/model";
 import { solidBorderColor } from "./startup";
 import { prepareLogo, type LogoImage } from "./texture";
 
@@ -88,6 +88,38 @@ async function toPng(c: HTMLCanvasElement): Promise<Blob> {
     canvas = next;
   }
   throw new Error("too big");
+}
+
+const LOOKUP_TIMEOUT_MS = 8000;
+const LOOKUP_MAX_BYTES = 8 * 1024 * 1024;
+const LOOKUP_MIN_SIDE = 64; // smaller icons look blurry on the flag
+
+/**
+ * Finds a logo for the startup's link through unavatar.io: the X avatar, or the website's icon.
+ * Returns null on any failure (bad link, not found, timeout, tiny icon). The caller stays silent.
+ * The result goes through the same pipeline and server checks as a file the visitor picks.
+ */
+export async function lookupLogo(link: string, signal: AbortSignal): Promise<File | null> {
+  const parsed = normalizeStartupLink(link);
+  if (!parsed.ok) return null;
+  const key = parsed.kind === "x" ? `x/${parsed.domain.slice("x.com/".length)}` : parsed.domain;
+  try {
+    const res = await fetch(`https://unavatar.io/${key}?fallback=false`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
+      referrerPolicy: "no-referrer",
+    });
+    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+    if (!res.ok || !ACCEPT.split(",").includes(type)) return null;
+    const blob = await res.blob();
+    if (!blob.size || blob.size > LOOKUP_MAX_BYTES) return null;
+    if (type !== "image/svg+xml") {
+      const img = await decodeImage(blob);
+      if (Math.min(img.naturalWidth, img.naturalHeight) < LOOKUP_MIN_SIDE) return null;
+    }
+    return new File([blob], "logo", { type });
+  } catch {
+    return null;
+  }
 }
 
 /**

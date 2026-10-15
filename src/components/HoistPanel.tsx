@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LogoImage } from "@/lib/flag/texture";
-import { ACCEPT, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
+import { ACCEPT, lookupLogo, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
 import { CATEGORIES, SALON_SEATS, seatsLine } from "@/lib/startups/model";
 import { toast } from "./Toast";
 import Icon from "./Icon";
@@ -42,6 +42,8 @@ export default function HoistPanel({
   const openedAt = useRef(Date.now());
   const panel = useRef<HTMLElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  // True when `file` came from the link lookup, not from the visitor. A picked file always wins.
+  const [autoFile, setAutoFile] = useState(false);
   const [removeBg, setRemoveBg] = useState(true);
   const [prepared, setPrepared] = useState<PreparedLogo | null>(null);
   const [stage, setStage] = useState<string | null>(null);
@@ -109,7 +111,14 @@ export default function HoistPanel({
         setPrepared(p);
         if (!bgTouched) setBg(p.bg);
       })
-      .catch(() => !cancelled && setError("No pudimos leer esa imagen. Probá con otro archivo."))
+      .catch(() => {
+        if (cancelled) return;
+        // A found logo that does not decode is dropped silently: the visitor uploads one.
+        if (autoFile) {
+          setFile(null);
+          setPrepared(null);
+        } else setError("No pudimos leer esa imagen. Probá con otro archivo.");
+      })
       .finally(() => !cancelled && setStage(null));
     return () => {
       cancelled = true;
@@ -117,6 +126,31 @@ export default function HoistPanel({
     // bgTouched is read once per file on purpose: a later color pick must not re-run the model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file, removeBg]);
+
+  // Logo from the link: once the link stops changing, look up the X avatar or the site icon.
+  // Silent: a miss leaves the drop zone empty. Never replaces a file the visitor picked.
+  useEffect(() => {
+    if (file && !autoFile) return;
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      const found = await lookupLogo(link, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      if (found) {
+        setAutoFile(true);
+        setFile(found);
+      } else if (autoFile) {
+        // The link changed and the new one has no logo: the old one belongs to another startup.
+        setFile(null);
+        setPrepared(null);
+      }
+    }, 700);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+    // Runs on link changes only. A picked file stops it through the early return.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link]);
 
   // Live preview on the second pole, at the top from the first moment: a plain flag in the chosen color,
   // then the logo once it is ready. "Izar" lowers it and runs the 2 s hoist.
@@ -142,6 +176,7 @@ export default function HoistPanel({
       setError("El archivo es muy grande (máximo 8 MB).");
       return;
     }
+    setAutoFile(false);
     setFile(f);
   }
 
