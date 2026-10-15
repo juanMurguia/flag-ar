@@ -8,9 +8,12 @@ import type { SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
-import { xIntent } from "./Share";
+import { ShareButtons, xIntent } from "./Share";
+import { ReportForm } from "./StartupView";
 import Icon from "./Icon";
 import { useLikes } from "./useLikes";
+
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
 
 const POLL_MS = 30_000;
 const FX_KEY = "flagar-hq";
@@ -497,23 +500,31 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           </button>
           {/* Keyed by flag: picking another one swaps the content in place while the card stays. */}
           <div className="salon-card-body" key={shown.id}>
+            <p className="startup-trail">
+              <span>Bandera #{shown.order}</span>
+              {categoryLabel(shown.category) && <span>· {categoryLabel(shown.category)}</span>}
+            </p>
             <h2 id="salon-card-name">{shown.name}</h2>
-            <a className="salon-card-link" href={shown.link} target="_blank" rel="noopener noreferrer">{shown.domain}</a>
-            <button
-              type="button" className="like-btn" aria-pressed={liked.has(shown.id)} onClick={() => toggleLike(shown)}
-              aria-label={liked.has(shown.id) ? `Sacar like a ${shown.name}` : `Darle like a ${shown.name}`}
-              title="Más likes, más cerca de la bandera argentina"
-            >
-              <Icon name="heart" size={13} />
-              <span>{likesOf(shown).toLocaleString("es-AR")}</span>
-            </button>
-            {stops > 1 && <CardNav at={(all.findIndex((x) => x.id === shown.id) + 1) || null} of={stops} step={step} />}
-            <div className="salon-card-actions">
-              <Link className="text-link" href={`/${shown.slug}`}>Ver bandera</Link>
+            <a className="salon-card-link" href={shown.link} target="_blank" rel="noopener noreferrer nofollow">
+              {shown.domain.startsWith("x.com/") ? `@${shown.domain.slice(6)}` : shown.domain}
+            </a>
+            {/* Like and arrows share one row: the card holds the whole flag page now, so it saves height. */}
+            <div className="salon-card-row">
+              <button
+                type="button" className="like-btn" aria-pressed={liked.has(shown.id)} onClick={() => toggleLike(shown)}
+                aria-label={liked.has(shown.id) ? `Sacar like a ${shown.name}` : `Darle like a ${shown.name}`}
+                title="Más likes, más cerca de la bandera argentina"
+              >
+                <Icon name="heart" size={13} />
+                <span>{likesOf(shown).toLocaleString("es-AR")}</span>
+              </button>
+              {stops > 1 && <CardNav at={(all.findIndex((x) => x.id === shown.id) + 1) || null} of={stops} step={step} />}
+            </div>
+            <CardDetails startup={shown}>
               <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
                 {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
               </button>
-            </div>
+            </CardDetails>
           </div>
         </aside>
       )}
@@ -613,6 +624,23 @@ const RANK_FOLDED = 3;
 
 /** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
 /** The tour's arrows inside a card: previous, "2 / 4", next. */
+/** Everything the flag's own page had: share, the wallpaper, a change request, and report. Keyed with the card
+    body, so the report form closes when another flag is picked. */
+function CardDetails({ startup, children }: { startup: PublicStartup; children: React.ReactNode }) {
+  const [report, setReport] = useState(false);
+  return (
+    <>
+      <ShareButtons name={startup.name} order={startup.order} url={`${SITE}/${startup.slug}`} />
+      <div className="salon-card-actions">
+        {children}
+        <Link className="text-link" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
+        <button type="button" className="text-link" aria-expanded={report} onClick={() => setReport(!report)}>Reportar</button>
+      </div>
+      {report && <div className="reveal"><ReportForm id={startup.id} /></div>}
+    </>
+  );
+}
+
 function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 | -1) => void }) {
   return (
     <div className="salon-card-nav">
