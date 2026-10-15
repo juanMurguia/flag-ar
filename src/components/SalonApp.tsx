@@ -31,12 +31,12 @@ function savedHigh(): boolean | null {
   }
 }
 
-/** Sound is on unless the visitor muted it before. */
+/** Sound is off unless the visitor turned it on before. */
 function savedSound(): boolean {
   try {
-    return localStorage.getItem(SOUND_KEY) !== "0";
+    return localStorage.getItem(SOUND_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -58,7 +58,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   highRef.current = high;
   // Sound: wind and a low drone. Browsers allow audio only after a gesture, so it starts on the first
   // click, tap or key press anywhere (except the sound button itself, which decides on its own).
-  const [sound, setSound] = useState(true);
+  const [sound, setSound] = useState(false);
   const soundRef = useRef(sound);
   const ambience = useRef<Ambience | null>(null);
   useEffect(() => {
