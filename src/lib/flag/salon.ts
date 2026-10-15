@@ -93,6 +93,8 @@ const PITCH_MIN = -0.3, PITCH_MAX = 0.35;
 // Middle-button drag raises and lowers the eye, to see over the front rows. The top stays under the
 // Argentine flag's top, so the view never turns into a map.
 const EYE_MAX = 10;
+// The floor is the start view's height: any lower and the eye dips into the cloud tops.
+const EYE_MIN = START.y;
 const LIFT_PER_PX = 0.03; // m of height per pixel of drag
 const EASE_MOVE = 4; // 1/s: how fast position catches its goal
 const EASE_LOOK = 9; // 1/s: how fast yaw and pitch catch theirs
@@ -1465,7 +1467,7 @@ export class SalonScene {
     const g = this.goalPos;
     g.x = Math.max(-w, Math.min(w, g.x));
     g.z = Math.max(end, Math.min(START.z + 8, g.z));
-    g.y = THREE.MathUtils.clamp(g.y, CLOUD_TOP + 1.5, EYE_MAX);
+    g.y = THREE.MathUtils.clamp(g.y, EYE_MIN, EYE_MAX);
   }
 
   private resize() {
