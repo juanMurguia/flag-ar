@@ -113,6 +113,8 @@ const BACKDROP_SCALE = 0.5;
 // Wallpaper still: jittered frames averaged (16 is where the edges stop changing), and cloud ray-march steps.
 const STILL_SAMPLES = 16;
 const STILL_CLOUD_STEPS = 128;
+const STILL_FOCUS_RANGE = 0.32;
+const STILL_BOKEH = 16;
 
 /** Low-discrepancy sequence in [0, 1): sub-pixel offsets that cover the pixel evenly. */
 function halton(i: number, base: number) {
@@ -893,7 +895,11 @@ export class SalonScene {
     this.clouds.update(this.time, this.camera);
     // A still has no frame budget: every effect on at its top quality, whatever the visitor picked.
     this.post.setFx({ ao: true, bloom: true, godRays: true });
-    this.post.setStill(true);
+    // Focus on the two flags; the sky and the far cloud sea fall out of focus. A range of a third of the
+    // distance keeps the whole of both cloths sharp; tighter, the far end of the startup's flag goes soft.
+    // Bokeh is in pixels: 16 at 4K is a lens near f/2.
+    const dist = pos.distanceTo(look);
+    this.post.setStill(true, { target: look.clone(), range: dist * STILL_FOCUS_RANGE, bokeh: STILL_BOKEH });
     this.clouds.setSteps(STILL_CLOUD_STEPS);
     const shadow = this.sunLight.shadow;
     if (this.sunLight.castShadow) {
@@ -912,8 +918,10 @@ export class SalonScene {
         avg.add(this.renderer.domElement); // same task as the render: WebGL drops the buffer after
         await new Promise((r) => setTimeout(r)); // let the page breathe between samples
       }
-      // Finish it like a print: vignette and grain.
-      applyFinish(avg.resolve(), width, height);
+      // Finish it like a frame of film. The light leak and halation lean toward the sun.
+      this.camera.clearViewOffset();
+      const sun = this.sky.raySun.position.clone().project(this.camera);
+      applyFinish(avg.resolve(), width, height, { sun: { x: (sun.x + 1) / 2, y: (1 - sun.y) / 2 } });
       return await canvasToBlob(avg.canvas, "image/jpeg", 0.95);
     } finally {
       this.camera.clearViewOffset();

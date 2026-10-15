@@ -12,12 +12,19 @@
 // the blue and gold of the golden-hour grade; ACES keeps them saturated, with a filmic contrast.
 import * as THREE from "three";
 import {
-  BlendFunction, BloomEffect, Effect, EffectAttribute, EffectComposer, EffectPass, GodRaysEffect, KernelSize, NoiseEffect, RenderPass,
+  BlendFunction, BloomEffect, DepthOfFieldEffect, Effect, EffectAttribute, EffectComposer, EffectPass, GodRaysEffect, KernelSize, NoiseEffect, RenderPass,
   HueSaturationEffect, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect,
 } from "postprocessing";
 import { N8AOPostPass } from "n8ao";
 
 const NOISE_OPACITY = 0.035;
+
+/** Depth of field for a still: the point kept sharp, the depth around it that stays sharp, the blur size. */
+export interface StillFocus {
+  target: THREE.Vector3;
+  range: number;
+  bokeh: number;
+}
 
 /** Scales the HDR image before tone mapping. postprocessing has no exposure control for its tone mappers. */
 class ExposureEffect extends Effect {
@@ -157,6 +164,8 @@ export class Post {
   private noise: NoiseEffect;
   /** Still mode: a single exported frame. Every pass at its best quality, whatever it costs. */
   private still = false;
+  private focus: StillFocus | null = null;
+  private dofPass: EffectPass | null = null;
   readonly exposure = new THREE.Uniform(0.38);
   readonly saturation = new HueSaturationEffect({ saturation: 0.28 });
   private glare = new Map<string, THREE.Uniform>([
@@ -205,19 +214,22 @@ export class Post {
    * Still mode for a downloaded frame: full-resolution AO at its top quality, more god-ray samples, and no
    * live noise (the still is averaged over jittered frames, then gets its own grain).
    */
-  setStill(still: boolean) {
-    if (still === this.still) return;
+  setStill(still: boolean, focus: StillFocus | null = null) {
+    if (still === this.still && focus === this.focus) return;
     this.still = still;
+    this.focus = still ? focus : null;
     this.noise.blendMode.opacity.value = still ? 0 : NOISE_OPACITY;
     this.build();
   }
 
   /** Rebuilds every pass after the RenderPass. Cheap: it runs only when a toggle changes. */
   private build() {
-    for (const p of [this.ao, this.hdrPass, this.ldrPass]) if (p) this.composer.removePass(p);
+    for (const p of [this.ao, this.dofPass, this.hdrPass, this.ldrPass]) if (p) this.composer.removePass(p);
     this.ao?.dispose();
+    this.dofPass?.dispose();
     this.hdrPass?.dispose();
     this.ao = null;
+    this.dofPass = null;
 
     if (this.fx.ao) {
       const ao = new N8AOPostPass(this.scene, this.camera, this.size.w, this.size.h);
@@ -231,6 +243,19 @@ export class Post {
       ao.setQualityMode(this.still ? "Ultra" : "Medium");
       this.ao = ao;
       this.composer.addPass(ao);
+    }
+
+    // Still only: a lens with a shallow focus. The flags stay sharp, the sky and the far clouds go soft.
+    // HDR, before exposure: the bright sun spreads into real bokeh instead of a grey smear.
+    if (this.focus) {
+      const dof = new DepthOfFieldEffect(this.camera, {
+        focusRange: this.focus.range,
+        bokehScale: this.focus.bokeh,
+        resolutionScale: 1,
+      });
+      dof.target = this.focus.target;
+      this.dofPass = new EffectPass(this.camera, dof);
+      this.composer.addPass(this.dofPass);
     }
 
     const effects: Effect[] = [new ExposureEffect(this.exposure)];
