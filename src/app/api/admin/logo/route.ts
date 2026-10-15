@@ -3,6 +3,7 @@ import { sameOrigin } from "@/lib/server/csrf";
 import { readForm, reply } from "@/lib/server/http";
 import { LOGO_MAX_BYTES, logoPath, reencodeLogo, storeLogo } from "@/lib/server/logo";
 import { invalidate } from "@/lib/server/startups";
+import { isHexColor } from "@/lib/startups/model";
 import { BUCKET_PUBLIC, serviceClient } from "@/lib/server/supabase";
 import { sniffImage } from "@/lib/server/validate";
 
@@ -26,7 +27,8 @@ export async function POST(req: Request) {
   const form = await readForm(req, MAX_BODY);
   const id = String(form?.get("id") ?? "");
   const file = form?.get("logo");
-  if (!form || !UUID.test(id) || !(file instanceof File) || file.size === 0) return reply(400, { message: "Bad request." });
+  const bg = String(form?.get("bg") ?? "").toLowerCase();
+  if (!form || !UUID.test(id) || !(file instanceof File) || file.size === 0 || !isHexColor(bg)) return reply(400, { message: "Bad request." });
 
   const raw = new Uint8Array(await file.arrayBuffer());
   if (!sniffImage(raw)) return reply(415, { message: "Use a PNG, JPG or WebP." });
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
   const now = new Date().toISOString();
   const { data: updated, error: upErr } = await db
     .from("startups")
-    .update({ logo_path: newPath, file_hash: hash, edit_version: version, updated_at: now, reviewed_at: now, reviewed_by: auth.user.id })
+    .update({ logo_path: newPath, file_hash: hash, bg_color: bg, edit_version: version, updated_at: now, reviewed_at: now, reviewed_by: auth.user.id })
     .eq("id", s.id).eq("edit_version", s.edit_version).select("id");
   if (upErr || !updated?.length) {
     await db.storage.from(BUCKET_PUBLIC).remove([newPath]);

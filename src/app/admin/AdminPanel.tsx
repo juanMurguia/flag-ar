@@ -116,10 +116,12 @@ export default function AdminPanel() {
     setBusy(true);
     setNotice("Processing logo…");
     try {
-      const { png } = await prepareUpload(file, true, setNotice);
+      const { png, bg } = await prepareUpload(file, true, setNotice);
       const form = new FormData();
       form.set("id", selected.id);
       form.set("logo", png, "logo.png");
+      // The old flag color was picked for the old logo; the new one may vanish on it.
+      form.set("bg", bg);
       const res = await fetch("/api/admin/logo", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as { message?: string };
       setNotice(body.message || (res.ok ? "Done." : `Error ${res.status}`));
