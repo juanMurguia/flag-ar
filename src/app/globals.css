@@ -422,9 +422,11 @@ h1, h2 { text-wrap: balance; }
 .hd-btn[aria-pressed="true"] { background: rgba(0, 0, 0, 0.08); }
 .salon.hoisting :is(.salon-corner, .cat-list) { display: none; }
 /* Category filter: a text chip in the corner pill, as wide as its name, and a glass list under it that reads
-   like the ranking. "Todas" sits quiet; a picked category gets the soft chip, like HD on. */
+   like the ranking. A picked category gets the soft chip, like HD on. */
 .cat-menu { display: flex; }
 .cat-chip { width: auto; max-width: 150px; display: inline-flex; gap: 3px; padding: 0 8px 0 10px; }
+/* Not a toggle like HD: off still reads in full ink, so the chip never looks disabled. */
+.cat-chip[aria-pressed="false"] { color: var(--ink); opacity: 1; }
 .cat-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-chip .ico-filter { display: none; }
 .cat-chip .ico-down { flex: none; transition: transform var(--quick) ease; }

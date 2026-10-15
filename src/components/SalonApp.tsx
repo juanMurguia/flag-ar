@@ -861,7 +861,7 @@ function CategoryMenu({ list, cats, value, onPick }: {
         aria-label={`Categoría: ${value ? categoryLabel(value) : "todas"}`} onClick={() => setOpen(!open)}
       >
         {/* Phones show the funnel alone: the top row has no room for a name beside the search. */}
-        <span className="cat-chip-label">{value ? categoryLabel(value)?.split(" / ")[0] : "Todas"}</span>
+        <span className="cat-chip-label">{value ? categoryLabel(value)?.split(" / ")[0] : "Categoría"}</span>
         <Icon name="down" size={11} />
         <Icon name="filter" size={14} />
       </button>
