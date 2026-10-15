@@ -697,6 +697,9 @@ function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 
   );
 }
 
+/** Gold, silver and bronze stand in for #1, #2 and #3. */
+const MEDALS = ["🥇", "🥈", "🥉"];
+
 /** Every startup by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
 function Ranking({ list, likesOf, onPick }: {
   list: PublicStartup[]; likesOf: (s: PublicStartup) => number; onPick: (s: PublicStartup) => void;
@@ -717,7 +720,11 @@ function Ranking({ list, likesOf, onPick }: {
         {rows.map(({ s, likes }, i) => (
           <li key={s.id}>
             <button type="button" onClick={() => onPick(s)} title={`Ir a ${s.name}`}>
-              <span className="ranking-pos">#{i + 1}</span>
+              <span className="ranking-pos">
+                {i < MEDALS.length
+                  ? <><span aria-hidden="true">{MEDALS[i]}</span><span className="sr-only">#{i + 1}</span></>
+                  : `#${i + 1}`}
+              </span>
               <span className="ranking-name">{s.name}</span>
               <span className="ranking-likes">
                 {likes.toLocaleString("es-AR")}
