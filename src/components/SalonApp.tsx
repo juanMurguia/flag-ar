@@ -48,8 +48,13 @@ function normalize(s: string) {
 export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   const holder = useRef<HTMLDivElement>(null);
   const scene = useRef<SalonScene | null>(null);
-  const [all, setAll] = useState(initial);
+  const [fetched, setAll] = useState(initial);
   const { liked, likesOf, toggle: toggleLike } = useLikes();
+  // Seat order with the visitor's own likes counted: a like moves the flag toward the front row at once.
+  const all = useMemo(
+    () => [...fetched].sort((a, b) => bySeat({ likes: likesOf(a), order: a.order }, { likes: likesOf(b), order: b.order })),
+    [fetched, likesOf],
+  );
   const [view, setView] = useState<"3d" | "grid" | null>(null);
   const [query, setQuery] = useState("");
   // High quality: null until the scene picks its device default. A saved choice wins over the default.

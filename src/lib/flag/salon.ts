@@ -1,15 +1,15 @@
 // Hall of Fame: a short row of flagpoles rising out of a sea of golden sunset clouds. A central
 // corridor runs toward the sun; the Argentine flag stands in it, a little larger and taller.
 //
-// Cost model: home stays light. The hall is one row of HALL_POLES poles. Startups take the best seats, and at
-// least one pole stays empty for the next one. The rest show in the showcase (tour, search, link), one cloth
-// at a time. With so few flags, every one is a real cloth simulation (cloth.ts) with its own cut of the wind,
-// like the Argentine flag: a vertex-shader wave read as stiff plastic next to it.
+// Cost model: one pole per approved startup (at most SALON_SEATS), plus one empty pole while seats are left.
+// Most likes stand in the front row; fewer likes, further back. Every flag is a real cloth simulation
+// (cloth.ts) with its own cut of the wind, like the Argentine flag: a vertex-shader wave read as stiff plastic
+// next to it. Only the cloths in view simulate, so the cost follows what the camera sees, not the hall size.
 // - Logos load only for flags on a pole or in the showcase. Nothing else is fetched.
 // - Empty slots hold plain white "tu startup acá" flags, so the hall never looks empty.
 // - Every pole stands on a crag that breaks through the clouds; far spires out in the sea give the scale.
 import * as THREE from "three";
-import type { PublicStartup } from "@/lib/startups/model";
+import { SALON_SEATS, type PublicStartup } from "@/lib/startups/model";
 import { Birds } from "./birds";
 import { FrameAverage, applyFinish, canvasToBlob } from "./finish";
 import { ClothSim, type WindLook } from "./cloth";
@@ -99,8 +99,6 @@ const ORBIT_EL_MIN = -0.06, ORBIT_EL_MAX = 0.3; // rad below and above it
 const ORBIT_ZOOM_MIN = 0.7, ORBIT_ZOOM_MAX = 1.35; // times the framing distance
 const EASE_ORBIT = 7; // 1/s
 
-// The hall, small on purpose: a big field of poles and cloths cost too much GPU and CPU on the home page.
-const HALL_POLES = 4;
 const HALL_INNER = 4.5; // m from the axis to the center of the inner cloths
 const HALL_DX = 4.5; // m between neighbors in a row: a cloth is 3.1 wide, so a gap of about 1.4 m
 const HOVER_GLOW = 0.1;
@@ -172,8 +170,13 @@ interface Slot {
   side: 1 | -1;
 }
 
+/** Row r's depth. Rows from the third on skip one step, so the Argentine flag stands in an open gap. */
+function rowZ(r: number) {
+  return FIRST_Z - (r < 2 ? r : r + 1) * DZ;
+}
+
 /**
- * The hall: rows of four in front, two cloths each side of the hero, best seats first (inner, then outer,
+ * The hall: rows of four, two cloths each side of the hero, best seats first (front row, inner, then outer,
  * left before right). Cloths fly to the right of their pole, so each pole stands half a cloth left of the
  * cloth center: the row looks even around the axis. Further rows stand DZ behind.
  */
@@ -181,7 +184,7 @@ export function hallSlots(n: number): Slot[] {
   return Array.from({ length: n }, (_, i) => {
     const side: 1 | -1 = i % 2 === 0 ? -1 : 1;
     const col = Math.floor((i % 4) / 2);
-    return { x: side * (HALL_INNER + col * HALL_DX) - FLAG_W / 2, z: FIRST_Z - Math.floor(i / 4) * DZ, side };
+    return { x: side * (HALL_INNER + col * HALL_DX) - FLAG_W / 2, z: rowZ(Math.floor(i / 4)), side };
   });
 }
 
@@ -262,7 +265,11 @@ export class SalonScene {
   private stone: THREE.MeshStandardMaterial;
   private plinth = new THREE.MeshStandardMaterial({ color: 0x9a948c, roughness: 0.85, metalness: 0 });
   private hall = new THREE.Group();
-  private flags: HallFlag[] = [];
+  private flags: HallFlag[] = []; // built once per slot and kept: a shorter list only hides the extra ones
+  private stands: THREE.Object3D[] = []; // crag and pole per built slot
+  private view = new THREE.Frustum();
+  private viewMat = new THREE.Matrix4();
+  private reach = new THREE.Sphere();
   private sunLight: THREE.DirectionalLight;
   private hovered = -1; // slot under the mouse
   private hoverFade = new Map<number, number>(); // slot -> 0..1, easing in or out
@@ -406,11 +413,11 @@ export class SalonScene {
     if (showingId !== undefined) this.showing = list.findIndex((s) => s.id === showingId);
     this.knownIds = new Set(list.map((s) => s.id));
     this.rising.clear();
-    this.poled = Math.min(list.length, HALL_POLES - 1); // one pole always free: the hoist needs it
-    const count = HALL_POLES;
+    this.poled = Math.min(list.length, SALON_SEATS);
+    const count = this.poled < SALON_SEATS ? this.poled + 1 : this.poled; // one pole free while seats are left: the hoist needs it
     this.cols = 2;
     this.slots = hallSlots(count);
-    if (!this.flags.length) this.buildHall();
+    this.buildHall();
     if (prevIds) {
       for (let i = 0; i < this.poled; i++) if (!prevIds.has(list[i].id)) this.rising.set(i, this.time);
     }
@@ -1089,18 +1096,24 @@ export class SalonScene {
 
   // ---------- Hall flags ----------
 
-  /** The hall, once: a crag and a pole per slot, and a simulated cloth on each, flown for a few seconds. */
+  /**
+   * Builds a crag, a pole and a simulated cloth (flown for a few seconds) for each new slot. Slots stay built
+   * once made: when the list shrinks, the extra ones only hide (refreshFlags).
+   */
   private buildHall() {
-    this.slots.forEach((p, i) => {
+    for (let i = this.flags.length; i < this.slots.length; i++) {
+      const p = this.slots[i];
       // Crags vary a little in size and height, as real rock does.
       const k = 0.5 + 0.5 * Math.sin(phaseOf(i) * 3.1);
-      this.hall.add(this.standPole(p.x, p.z, POLE_H, HALL_POLE_R, HALL_ROCK.radius * (0.85 + 0.3 * k), HALL_ROCK.top - 0.25 * k, 11 + i, FLAG_H - 0.05));
+      const stand = this.standPole(p.x, p.z, POLE_H, HALL_POLE_R, HALL_ROCK.radius * (0.85 + 0.3 * k), HALL_ROCK.top - 0.25 * k, 11 + i, FLAG_H - 0.05);
+      this.hall.add(stand);
+      this.stands.push(stand);
       const f = this.makeFlag(hallWind(i));
       for (let t = 0; t < HALL_WARMUP; t += 1 / 60) f.cloth.update(1 / 60, f.geo);
       f.mesh.userData.index = i;
       this.hall.add(f.mesh);
       this.flags.push(f);
-    });
+    }
   }
 
   /** Paints slot i: the startup on it (its logo once loaded), or the empty pole's own design. */
@@ -1125,7 +1138,15 @@ export class SalonScene {
 
   /** The visitor's own flag covers the claimed slot's cloth. */
   private refreshFlags() {
-    this.flags.forEach((f, i) => (f.mesh.visible = !(this.claim && this.claim.slot === i)));
+    const n = this.slots.length;
+    this.stands.forEach((s, i) => (s.visible = i < n));
+    this.flags.forEach((f, i) => (f.mesh.visible = i < n && !(this.claim && this.claim.slot === i)));
+  }
+
+  /** True when the cloth's whole reach is outside the view: its simulation can wait. */
+  private offView(f: HallFlag) {
+    this.reach.copy(f.geo.boundingSphere!).applyMatrix4(f.mesh.matrixWorld);
+    return !this.view.intersectsSphere(this.reach);
   }
 
   /** Eases the hovered flag in (a faint warm glow) and the previous one back out. */
@@ -1399,7 +1420,11 @@ export class SalonScene {
     if (this.argCloth && this.argGeo) this.argCloth.update(dt, this.argGeo);
     if (this.showing >= 0 && this.show?.cloth) this.show.cloth.update(dt, this.show.geo);
 
-    if (this.hall.visible) this.flags.forEach((f) => f.mesh.visible && f.cloth.update(dt, f.geo));
+    if (this.hall.visible) {
+      this.camera.updateMatrixWorld();
+      this.view.setFromProjectionMatrix(this.viewMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
+      for (const f of this.flags) if (f.mesh.visible && !this.offView(f)) f.cloth.update(dt, f.geo);
+    }
 
     // Rising flags and highlight pulse.
     for (const [i, t0] of this.rising) {
@@ -1430,7 +1455,7 @@ export class SalonScene {
 
   private clampPos() {
     const rows = Math.ceil(this.slots.length / (this.cols * 2));
-    const end = FIRST_Z - rows * DZ;
+    const end = rowZ(Math.max(rows, 1)); // one step behind the last row
     const w = CORRIDOR + this.cols * DX;
     const g = this.goalPos;
     g.x = Math.max(-w, Math.min(w, g.x));
