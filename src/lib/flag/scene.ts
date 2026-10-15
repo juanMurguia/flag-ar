@@ -1,6 +1,7 @@
 // Two poles at sunset: the Argentine flag (observer's right, higher: place of honor) and a startup's
 // flag beside it. Renderer, lights, camera orbit, hoist animation, still and video export.
 import * as THREE from "three";
+import { applyFinish } from "./finish";
 import { FlagStaff } from "./staff";
 import {
   LAYOUT_H, LAYOUT_W, buildWeave, createCanvas, drawArgentineFlag, drawStartupFlag, type LogoImage,
@@ -394,7 +395,12 @@ export class PairScene {
     this.renderer.setSize(w, h, false);
     if (sameView) this.placeCamera(w, h, free, this.yaw, this.pitch, this.zoom);
     else this.placeCamera(w, h, free, DEFAULT_YAW, DEFAULT_PITCH, 1);
+    // A download during the hoist would catch the startup flag halfway up, or below the frame: export it
+    // where the hoist ends. The live view goes on from where it was.
+    const hoisting = this.hoist !== this.hoistTarget;
+    if (hoisting) this.startup.setHoist(this.hoistTarget);
     this.renderFrame();
+    if (hoisting) this.startup.setHoist(this.hoist);
     // Copy in the same task: the WebGL buffer is not kept after this frame.
     const out = createCanvas(w, h);
     const ctx = out.getContext("2d")!;
@@ -404,6 +410,10 @@ export class PairScene {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(this.renderer.domElement, 0, 0);
+    // Downloads (headers, wallpapers) get the same film finish as the Hall of Fame wallpaper. This scene
+    // has no sun in frame, so no light leak and no streak. The plain capture stays as the screen shows it.
+    // The watermark goes on last, so the grade and grain do not touch it.
+    if (!sameView) applyFinish(ctx, w, h, { leak: 0, streak: 0 });
     drawWatermark(ctx, w, h);
     this.renderer.setPixelRatio(pr);
     this.resize();

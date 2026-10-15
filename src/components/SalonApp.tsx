@@ -107,6 +107,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   // First visit: one line on how the hall works, gone at the first click, tap, wheel, or key.
   const [hint, setHint] = useState(false);
   const [ready, setReady] = useState(false); // the 3D scene shows its first frames
+  const [wallpaperBusy, setWallpaperBusy] = useState(false);
   useEffect(() => {
     let seen = true;
     try {
@@ -378,11 +379,17 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     } catch {}
   }
 
+  // The 4K wallpaper renders many frames and grades them on the CPU: it takes several seconds.
   async function wallpaper() {
     const s = scene.current;
     const i = shown ? listRef.current.findIndex((x) => x.id === shown.id) : -1;
-    if (!s || !shown || i < 0) return;
-    saveBlob(await s.wallpaper(i, 3840, 2160), `wallpaper-4k-${shown.slug}.jpg`);
+    if (!s || !shown || i < 0 || wallpaperBusy) return;
+    setWallpaperBusy(true);
+    try {
+      saveBlob(await s.wallpaper(i, 3840, 2160), `wallpaper-4k-${shown.slug}.jpg`);
+    } finally {
+      setWallpaperBusy(false);
+    }
   }
 
   const tweet = xIntent(
@@ -484,7 +491,9 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
             )}
             <div className="salon-card-actions">
               <Link className="text-link" href={`/${shown.slug}`}>Ver bandera</Link>
-              <button type="button" className="text-link" onClick={wallpaper}>Fondo 4K <Icon name="download" size={12} /></button>
+              <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
+                {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>Fondo 4K <Icon name="download" size={12} /></>}
+              </button>
             </div>
           </div>
         </aside>

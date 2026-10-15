@@ -113,7 +113,7 @@ const BACKDROP_SCALE = 0.5;
 // Wallpaper still: jittered frames averaged (16 is where the edges stop changing), and cloud ray-march steps.
 const STILL_SAMPLES = 16;
 const STILL_CLOUD_STEPS = 128;
-const STILL_FOCUS_RANGE = 0.32;
+const STILL_FOCUS_RANGE = 0.42;
 const STILL_BOKEH = 16;
 
 /** Low-discrepancy sequence in [0, 1): sub-pixel offsets that cover the pixel evenly. */
@@ -895,8 +895,8 @@ export class SalonScene {
     this.clouds.update(this.time, this.camera);
     // A still has no frame budget: every effect on at its top quality, whatever the visitor picked.
     this.post.setFx({ ao: true, bloom: true, godRays: true });
-    // Focus on the two flags; the sky and the far cloud sea fall out of focus. A range of a third of the
-    // distance keeps the whole of both cloths sharp; tighter, the far end of the startup's flag goes soft.
+    // Focus on the two flags; the sky and the far cloud sea fall out of focus. A range of 0.42 of the distance
+    // keeps the whole of both cloths sharp, even when the wind curls the startup's flag away from the camera.
     // Bokeh is in pixels: 16 at 4K is a lens near f/2.
     const dist = pos.distanceTo(look);
     this.post.setStill(true, { target: look.clone(), range: dist * STILL_FOCUS_RANGE, bokeh: STILL_BOKEH });
