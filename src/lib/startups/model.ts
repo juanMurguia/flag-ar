@@ -7,7 +7,7 @@ export type StartupStatus = "pending" | "approved" | "rejected";
  * Seats in the Hall of Fame. Only approved flags take one. When the hall is full, new flags still come in
  * and wait as pending (the waitlist): the admin API refuses an approval past this number.
  */
-export const SALON_SEATS = 50;
+export const SALON_SEATS = 64;
 
 /** One quiet line about the seats left. `taken` is the number of approved flags. */
 export function seatsLine(taken: number): string {
