@@ -429,15 +429,13 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   );
 
   return (
-    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}${shown || freePick !== null ? " card-open" : ""}`}>
+    <main className={`salon${view === "grid" ? " grid-mode" : ""}${view !== "grid" && !ready ? " loading" : ""}${hoist === "open" ? " hoisting" : ""}${shown || freePick !== null ? " card-open" : ""}`}>
       {view === "3d" && <div ref={holder} className="salon-holder" />}
-      {/* Shown while the scene code loads and the first frames compile shaders. Fades out with the canvas fade-in. */}
-      {view === "3d" && (
+      {/* Until the first frames are on screen: a plain cover in the scene's own colors and a spinner, nothing
+          else. The chrome waits (.salon.loading), then drops in. The cover fades out with the canvas fade-in. */}
+      {view !== "grid" && (
         <div className="salon-loader" data-state={ready ? "done" : "loading"} role="status" aria-hidden={ready}>
-          <svg className="salon-loader-flag" viewBox="0 0 48 40" aria-hidden="true">
-            <line x1="6" y1="2" x2="6" y2="38" />
-            <path d="M6 5 C14 1 20 9 28 5 S40 3 44 5 V21 C40 19 34 23 28 21 S14 17 6 21 Z" />
-          </svg>
+          <span className="salon-loader-ring" aria-hidden="true" />
           <span className="sr-only">Cargando</span>
         </div>
       )}

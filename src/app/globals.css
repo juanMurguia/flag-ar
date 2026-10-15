@@ -356,19 +356,23 @@ h1, h2 { text-wrap: balance; }
 
 /* Loader: a small flag that waves over the dusk backdrop until the first frames are on screen. */
 /* Icon only, on a glass disc as the rest of the chrome: a bare icon vanishes on the bright sun at the center. */
+/* Loading cover: the whole screen, in the first frame's colors (gold sky over pink clouds), so the canvas
+   fades in over almost the same picture. No purple page backdrop in between. */
 .salon-loader {
-  position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: grid; place-items: center;
-  width: 40px; height: 40px; border-radius: 50%; color: var(--ink);
-  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--shadow-sm);
-  pointer-events: none; transition: opacity 700ms ease; /* same as the canvas fade-in: one cross-fade */
-  animation: fade 400ms 150ms ease both; /* a fast load never flashes it */
+  position: absolute; inset: 0; z-index: 5; display: grid; place-items: center;
+  background: linear-gradient(180deg, #e9d3b0 0%, #ecd2a6 42%, #d8b9a8 70%, #c3a3a6 100%);
+  pointer-events: none; transition: opacity 700ms ease, visibility 0s 700ms; /* same as the canvas fade-in: one cross-fade */
 }
-.salon-loader[data-state="done"] { opacity: 0; }
-.salon-loader-flag { width: 20px; height: 17px; overflow: visible; }
-.salon-loader-flag line { stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
-.salon-loader-flag path { fill: #74acdf; transform-origin: 6px 13px; animation: loader-wave 1.4s ease-in-out infinite alternate; }
-@keyframes loader-wave { from { transform: skewY(-4deg) scaleX(0.94); } to { transform: skewY(4deg) scaleX(1); } }
-@media (prefers-reduced-motion: reduce) { .salon-loader-flag path { animation: none; } }
+.salon-loader[data-state="done"] { opacity: 0; visibility: hidden; }
+/* A plain ring. It waits a moment: a fast load never flashes it. */
+.salon-loader-ring {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid rgba(58, 42, 40, 0.18); border-top-color: rgba(58, 42, 40, 0.7);
+  animation: spin 800ms linear infinite, fade 300ms 250ms ease both;
+}
+/* While it loads, the chrome stays out. Taking its entry animation away too means it plays when the class
+   goes, so the bar and the dock drop in over the first real frame. */
+.salon.loading :is(.salon-bar, .salon-seats, .ranking, .salon-corner, .salon-nav, .salon-hint) { visibility: hidden; animation: none; }
 
 /* Hall bar: one row, 36 px tall. Every control is 28 px, 4 px apart, 4 px from the edge.
    A thin rule splits count+search from quality+hoist. */
@@ -549,7 +553,7 @@ h1, h2 { text-wrap: balance; }
   background: rgba(20, 18, 24, 0.55); animation: drop-in 420ms var(--ease-out) 900ms both;
 }
 @media (max-width: 640px) { .salon-hint { white-space: normal; text-align: center; width: calc(100% - 48px); } }
-.salon-nav-label { font: inherit; font-size: 12px; color: var(--ink); background: none; border: 0; padding: 0 8px; height: 28px; cursor: pointer; }
+.salon-nav-label { font: inherit; font-size: 12px; color: var(--ink); background: none; border: 0; padding: 0 8px; height: 28px; cursor: pointer; white-space: nowrap; }
 /* "Agregar mi startup": the one primary action in the tour pill. Celeste cloth, a white band of light that
    sweeps across on hover, and the Sol de Mayo in gold, turning slowly. Navy text: white on celeste fails contrast. */
 .nav-cta {
