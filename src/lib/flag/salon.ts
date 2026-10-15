@@ -2,9 +2,9 @@
 // corridor runs toward the sun; the Argentine flag stands in it, a little larger and taller.
 //
 // Cost model: one pole per approved startup (at most SALON_SEATS), plus one empty pole while seats are left.
-// Most likes stand in the front row; fewer likes, further back. Every flag is a real cloth simulation
-// (cloth.ts) with its own cut of the wind, like the Argentine flag: a vertex-shader wave read as stiff plastic
-// next to it. Only the cloths in view simulate, so the cost follows what the camera sees, not the hall size.
+// Most likes stand in the front row; fewer likes, further back. Only the Argentine flag and the showcase
+// flag are real cloth simulations (cloth.ts). Hall flags wave in the vertex shader (wave.ts, gust mode),
+// each on its own beat: no CPU cost per flag, so the frame time does not grow with the hall.
 // - Logos load only for flags on a pole or in the showcase. Nothing else is fetched.
 // - Empty slots hold plain white "tu startup acá" flags, so the hall never looks empty.
 // - Every pole stands on a crag that breaks through the clouds; far spires out in the sea give the scale.
@@ -21,7 +21,7 @@ import { buildPole, poleMaterials } from "./pole";
 import { Post, type PostFx, type StillFocus } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
 import { clothFinish, createCanvas, drawArgentineFlag, drawPlaceholderFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
-import { flagGeometry } from "./wave";
+import { applyWave, flagGeometry, type WaveUniforms } from "./wave";
 
 // ---------- Layout (meters) ----------
 const FLAG_W = 3.1, FLAG_H = 2.0;
@@ -70,9 +70,7 @@ const FOG_DENSITY = 0.0024; // aerial perspective: far crags fade into the amber
 const HALL_ROCK = { radius: 0.95, top: CLOUD_TOP + 0.2 };
 const ARG_ROCK = { radius: 2.0, top: CLOUD_TOP + 0.6 };
 const HALL_POLE_R = 0.07, ARG_POLE_R = 0.13;
-// Hall cloth: light bunting on the same wind as the Argentine flag. Each pole gets its own drag, lift, fold
-// stiffness and turbulence seed (hallWind), so no two flags move alike.
-const HALL_WARMUP = 3; // s of simulated wind before the hall shows
+// Hall cloth: light bunting, waved on the GPU. Each pole gets its own phase (phaseOf), so no two flags move alike.
 const HALL_RIM = 0.22;
 const HALL_BACKLIGHT = 1.2; // thin cloth: the low sun shows through it
 const HALL_TRANSMIT = 0.16; // a little of the sun through it: more, and a red flag near the sun burns like neon
@@ -206,12 +204,6 @@ export function phaseOf(i: number) {
   return (i * 2.39996) % (Math.PI * 2);
 }
 
-/** Slot i's cut of the wind: the hero's speed and direction, its own weight, stiffness and gusts. */
-function hallWind(i: number): WindLook {
-  const h = (k: number) => 0.5 + 0.5 * Math.sin(phaseOf(i) * k + k);
-  return { speed: ARG_CLOTH.speed, drag: 2.5 + 0.7 * h(1.3), lift: 3.5 + 1.0 * h(2.7), bend: 0.03 + 0.035 * h(4.1), seed: i + 1 };
-}
-
 /** The pair shot: the picked startup's cloth next to the Argentine flag. */
 interface Showcase {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
@@ -226,15 +218,15 @@ interface Showcase {
   painted: "none" | "color" | "logo";
 }
 
-/** A simulated cloth on a hall pole (or the visitor's own flag), with its own canvas texture. */
+/** A GPU-waved cloth on a hall pole (or the visitor's own flag), with its own canvas texture. */
 interface HallFlag {
   mesh: THREE.Mesh;
   geo: THREE.BufferGeometry;
   material: THREE.MeshPhysicalMaterial;
+  depth: THREE.MeshDepthMaterial; // shadow, bent by the same wave
   texture: THREE.CanvasTexture;
   canvas: HTMLCanvasElement;
   uniforms: BacklightUniforms;
-  cloth: ClothSim;
   painted: string; // what is on the canvas: "", "empty", "<id>:color" or "<id>:logo"
 }
 
@@ -283,9 +275,9 @@ export class SalonScene {
   private hall = new THREE.Group();
   private flags: HallFlag[] = []; // built once per slot and kept: a shorter list only hides the extra ones
   private stands: THREE.Object3D[] = []; // crag and pole per built slot
-  private view = new THREE.Frustum();
-  private viewMat = new THREE.Matrix4();
-  private reach = new THREE.Sphere();
+  // Wind clock and strength shared by every hall flag's wave shader: one write a frame moves them all.
+  private hallTime = { value: 0 };
+  private hallWindK = { value: 1 };
   private sunLight: THREE.DirectionalLight;
   private hovered = -1; // slot under the mouse
   private hoverFade = new Map<number, number>(); // slot -> 0..1, easing in or out
@@ -480,7 +472,7 @@ export class SalonScene {
     // Remember the view on the first claim, so closing the sheet flies back to it.
     if (!this.claim) this.beforeClaim = { pos: this.pos.clone(), yaw: this.yaw, pitch: this.pitch };
     if (!this.claim) {
-      const flag = this.makeFlag(hallWind(slot));
+      const flag = this.makeFlag(slot);
       drawStartupFlag(flag.canvas, { logo: null, bg: "#ffffff", weave: clothFinish(flag.canvas.width, flag.canvas.height) });
       flag.texture.needsUpdate = true;
       this.scene.add(flag.mesh);
@@ -562,6 +554,7 @@ export class SalonScene {
     this.scene.remove(c.flag.mesh);
     c.flag.geo.dispose();
     c.flag.material.dispose();
+    c.flag.depth.dispose();
     c.flag.texture.dispose();
     this.claim = null;
     this.refreshFlags();
@@ -571,7 +564,6 @@ export class SalonScene {
   private updateClaim(dt: number) {
     const c = this.claim;
     if (!c) return;
-    if (c.flag.mesh.visible) c.flag.cloth.update(dt, c.flag.geo);
     if (c.hoist !== c.target) {
       const f = Math.min(1, (this.time - c.start) / c.dur);
       const k = f < 0.5 ? 4 * f ** 3 : 1 - Math.pow(-2 * f + 2, 3) / 2;
@@ -1069,8 +1061,12 @@ export class SalonScene {
         mats.forEach((mm) => mm.dispose());
       }
     });
-    for (const f of this.flags) f.texture.dispose();
+    for (const f of this.flags) {
+      f.texture.dispose();
+      f.depth.dispose();
+    }
     this.claim?.flag.texture.dispose();
+    this.claim?.flag.depth.dispose();
     this.scene.environment?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -1146,8 +1142,11 @@ export class SalonScene {
     this.scene.add(spot, spot.target);
   }
 
-  /** Cloth for a simulated flag: woven normal map, print-tinted sheen, and the sun through it. */
-  private fabricMaterial(map: THREE.Texture, uniforms: BacklightUniforms) {
+  /**
+   * Cloth for a flag: woven normal map, print-tinted sheen, and the sun through it. With `wave`, the vertex
+   * shader bends it (hall flags); without, a ClothSim writes the positions.
+   */
+  private fabricMaterial(map: THREE.Texture, uniforms: BacklightUniforms, wave?: WaveUniforms) {
     const normal = clothNormalMap();
     normal.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const mat = new THREE.MeshPhysicalMaterial({
@@ -1157,13 +1156,15 @@ export class SalonScene {
       normalMap: normal, normalScale: new THREE.Vector2(0.9, 0.9),
     });
     mat.normalMap!.repeat.set(...CLOTH_NORMAL_REPEAT);
+    // applyWave sets onBeforeCompile outright, so it goes first; the others chain onto it.
+    if (wave) applyWave(mat, wave, false, true);
     return applyBacklight(mat, uniforms);
   }
 
   // ---------- Hall flags ----------
 
   /**
-   * Builds a crag, a pole and a simulated cloth (flown for a few seconds) for each new slot. Slots stay built
+   * Builds a crag, a pole and a waving cloth for each new slot. Slots stay built
    * once made: when the list shrinks, the extra ones only hide (refreshFlags).
    */
   private buildHall() {
@@ -1174,8 +1175,7 @@ export class SalonScene {
       const stand = this.standPole(p.x, p.z, POLE_H, HALL_POLE_R, HALL_ROCK.radius * (0.85 + 0.3 * k), HALL_ROCK.top - 0.25 * k, 11 + i, FLAG_H - 0.05);
       this.hall.add(stand);
       this.stands.push(stand);
-      const f = this.makeFlag(hallWind(i));
-      for (let t = 0; t < HALL_WARMUP; t += 1 / 60) f.cloth.update(1 / 60, f.geo);
+      const f = this.makeFlag(i);
       f.mesh.userData.index = i;
       this.hall.add(f.mesh);
       this.flags.push(f);
@@ -1207,12 +1207,6 @@ export class SalonScene {
     const n = this.slots.length;
     this.stands.forEach((s, i) => (s.visible = i < n));
     this.flags.forEach((f, i) => (f.mesh.visible = i < n && !(this.claim && this.claim.slot === i)));
-  }
-
-  /** True when the cloth's whole reach is outside the view: its simulation can wait. */
-  private offView(f: HallFlag) {
-    this.reach.copy(f.geo.boundingSphere!).applyMatrix4(f.mesh.matrixWorld);
-    return !this.view.intersectsSphere(this.reach);
   }
 
   /** Eases the hovered flag in (a faint warm glow) and the previous one back out. */
@@ -1278,8 +1272,8 @@ export class SalonScene {
     return null;
   }
 
-  /** A simulated cloth flag of light bunting with its own canvas texture. The caller adds it to the scene. */
-  private makeFlag(wind: WindLook): HallFlag {
+  /** A GPU-waved flag of light bunting with its own canvas texture. The caller adds it to the scene. */
+  private makeFlag(slot: number): HallFlag {
     const canvas = createCanvas(768, 496);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -1287,17 +1281,22 @@ export class SalonScene {
     const uniforms = this.backlight();
     uniforms.uBacklight.value = HALL_BACKLIGHT;
     uniforms.uTransmit.value = HALL_TRANSMIT;
-    const material = this.fabricMaterial(texture, uniforms);
+    // Shared clock and wind, own size and phase: each flag on its own beat, all moved by one uniform write.
+    const wave: WaveUniforms = {
+      uTime: this.hallTime, uWind: this.hallWindK, uSize: { value: new THREE.Vector2(FLAG_W, FLAG_H) }, uPhase: { value: phaseOf(slot) },
+    };
+    const material = this.fabricMaterial(texture, uniforms, wave);
     applyRim(material, { uRimColor: { value: this.sunColor.clone().multiplyScalar(HALL_RIM) } });
     const [sx, sy] = TIERS[this.tier].cloth;
     const geo = flagGeometry(FLAG_W, FLAG_H, sx, sy);
-    // The cloth moves on the CPU; a sphere around its whole reach keeps picking from missing its fly end.
+    // The shader moves the cloth off the flat plane: a sphere around its whole reach keeps culling and
+    // picking from missing its fly end.
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(FLAG_W / 2, -FLAG_H / 2, 0), FLAG_W);
     const mesh = new THREE.Mesh(geo, material);
-    mesh.frustumCulled = false;
     mesh.castShadow = true;
-    const cloth = new ClothSim(FLAG_W, FLAG_H, sx, sy, wind);
-    return { mesh, geo, material, texture, canvas, uniforms, cloth, painted: "" };
+    const depth = applyWave(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), wave, false, true);
+    mesh.customDepthMaterial = depth;
+    return { mesh, geo, material, depth, texture, canvas, uniforms, painted: "" };
   }
 
   private backlight(): BacklightUniforms {
@@ -1490,11 +1489,7 @@ export class SalonScene {
       this.show.fade.uFade.value = t * t * (3 - 2 * t);
     }
 
-    if (this.hall.visible) {
-      this.camera.updateMatrixWorld();
-      this.view.setFromProjectionMatrix(this.viewMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
-      for (const f of this.flags) if (f.mesh.visible && !this.offView(f)) f.cloth.update(dt, f.geo);
-    }
+    this.hallTime.value = this.time;
 
     // Rising flags and highlight pulse.
     for (const [i, t0] of this.rising) {
