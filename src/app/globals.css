@@ -420,23 +420,47 @@ h1, h2 { text-wrap: balance; }
 .hd-btn { font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
 .hd-btn[aria-pressed="false"] { color: var(--muted); opacity: 0.5; }
 .hd-btn[aria-pressed="true"] { background: rgba(0, 0, 0, 0.08); }
-.salon.hoisting .salon-corner { display: none; }
-/* Row category: a quiet text chip beside "Fila", as wide as its name. The select on top is clear: it only
-   takes the click and opens the list. Long names cut short; the open list shows them whole. */
-.row-cat {
-  position: relative; display: block; width: auto; max-width: 140px; padding: 0 10px; line-height: 28px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  animation: drop-in 220ms var(--ease-out) both;
+.salon.hoisting :is(.salon-corner, .cat-list) { display: none; }
+/* Category filter: a text chip in the corner pill, as wide as its name, and a glass list under it that reads
+   like the ranking. "Todas" sits quiet; a picked category gets the soft chip, like HD on. */
+.cat-menu { display: flex; }
+.cat-chip { width: auto; max-width: 150px; display: inline-flex; gap: 3px; padding: 0 8px 0 10px; }
+.cat-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-chip .ico-filter { display: none; }
+.cat-chip .ico-down { flex: none; transition: transform var(--quick) ease; }
+.cat-chip[aria-expanded="true"] .ico-down { transform: rotate(180deg); }
+.cat-list {
+  position: absolute; z-index: 3; top: calc(max(12px, env(safe-area-inset-top)) + 42px); right: 12px; width: 220px; padding: 4px;
+  display: grid; border-radius: var(--radius-lg); color: var(--ink); --muted: #3d3d3d;
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sm);
+  max-height: min(70vh, calc(15 * 26px + 8px)); overflow: hidden auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+  transform-origin: top right; animation: pop-down 180ms var(--ease-out) both;
 }
-.row-cat select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
-.row-cat:has(select:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
-.row-cat[data-on="false"] { color: var(--muted); }
-.row-cat[data-on="true"] { background: rgba(0, 0, 0, 0.08); }
-@media (pointer: coarse) { .salon-corner .row-cat { width: auto; line-height: 36px; } }
+.cat-list button {
+  width: 100%; height: 26px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 8px;
+  background: none; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.cat-list button:active { background: rgba(0, 0, 0, 0.1); }
+@media (hover: hover) and (pointer: fine) { .cat-list button:hover { background: rgba(0, 0, 0, 0.06); } }
+.cat-list button[aria-pressed="true"] { font-weight: 600; }
+.cat-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cat-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+.cat-check { flex: none; width: 11px; display: grid; place-items: center; }
+@media (pointer: coarse) {
+  .salon-corner .cat-chip { width: auto; }
+  .cat-list { top: calc(max(12px, env(safe-area-inset-top)) + 50px); }
+  .cat-list button { height: 36px; }
+}
 
 /* Phones: the bar spans the width, search takes the slack. */
 @media (max-width: 640px) {
-  .salon-bar { width: calc(100% - 98px); margin-left: 12px; }
+  /* Room for the corner pill: four 36 px buttons, its padding, and a gap. */
+  .salon-bar { width: calc(100% - 190px); margin-left: 12px; }
+  .salon-corner .cat-chip { width: 36px; padding: 0; }
+  .cat-chip :is(.cat-chip-label, .ico-down) { display: none; }
+  .cat-chip .ico-filter { display: block; }
   .search { flex: 1 1 auto; min-width: 0; }
   .search input, .search input:focus { width: 100%; min-width: 40px; }
 }

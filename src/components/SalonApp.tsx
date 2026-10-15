@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import HoistPanel from "./HoistPanel";
@@ -74,11 +75,11 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   // 3D layout: the hall, or every flag in one row sized by its likes.
   const [layout, setLayout] = useState<Layout>("hall");
   // The row can show one category only. Null shows every flag.
-  const [rowCat, setRowCat] = useState<string | null>(null);
-  const rowCatRef = useRef(rowCat);
-  rowCatRef.current = rowCat;
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const catFilterRef = useRef(catFilter);
+  catFilterRef.current = catFilter;
   // The picker lists only the categories that have a flag.
-  const rowCats = useMemo(() => CATEGORIES.filter((c) => all.some((s) => s.category === c.key)), [all]);
+  const filterCats = useMemo(() => CATEGORIES.filter((c) => all.some((s) => s.category === c.key)), [all]);
   const [query, setQuery] = useState("");
   // High quality: null until the scene picks its device default. A saved choice wins over the default.
   const [high, setHigh] = useState<boolean | null>(null);
@@ -186,7 +187,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
     }
     hoistSlot.current = slot;
     setLayout("hall"); // the hoist happens in the hall: claimSlot leaves the row view
-    setRowCat(null);
+    setCatFilter(null);
     setPicked(null);
     setFreePick(null);
     if (location.pathname === "/izar") s.claimSlot(slot); // already open: another empty pole takes the flag
@@ -354,13 +355,13 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   const freeSlots = (view === "3d" && scene.current?.emptySlots()) || [];
   if (freePick !== null && freeSlots.includes(freePick)) navRef.current = all.length + freeSlots.indexOf(freePick);
   // A category row tours only its own flags, and counts them on its own.
-  const tour = useMemo(() => (rowCat ? all.filter((s) => s.category === rowCat) : all), [all, rowCat]);
+  const tour = useMemo(() => (catFilter ? all.filter((s) => s.category === catFilter) : all), [all, catFilter]);
   const stops = tour.length + freeSlots.length;
   const step = useCallback((d: 1 | -1) => {
     const s = scene.current;
     if (!s) return;
     const list = listRef.current, n = list.length, free = s.emptySlots(), total = n + free.length;
-    const cat = rowCatRef.current;
+    const cat = catFilterRef.current;
     const inTour = (i: number) => i >= n || cat === null || list[i].category === cat;
     if (!total || (!free.length && !list.some((_, i) => inTour(i)))) return;
     let next = navRef.current === null ? (d > 0 ? 0 : total - 1) : (navRef.current + d + total) % total;
@@ -452,19 +453,18 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   function toggleLayout() {
     const next = layout === "hall" ? "row" : "hall";
     setLayout(next);
-    setRowCat(null);
     setPicked(null);
     setFreePick(null);
     navRef.current = null;
-    scene.current?.setLayout(next);
+    scene.current?.setLayout(next, catFilter); // the category filter carries over
   }
 
-  function pickRowCat(cat: string | null) {
-    setRowCat(cat);
+  function pickCatFilter(cat: string | null) {
+    setCatFilter(cat);
     setPicked(null);
     setFreePick(null);
     navRef.current = null;
-    scene.current?.setLayout("row", cat);
+    scene.current?.setLayout(layout, cat);
   }
 
   function toggleSound() {
@@ -539,23 +539,15 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
       {high !== null && (
         <div className="salon-corner">
+          {filterCats.length > 1 && (
+            <CategoryMenu list={all} cats={filterCats} value={catFilter} onPick={pickCatFilter} />
+          )}
           <button
             type="button" className="bar-btn hd-btn" aria-pressed={layout === "row"} onClick={toggleLayout}
             aria-label="Ver en fila" title={layout === "row" ? "Volver al salón" : "Todas en fila, de más a menos likes"}
           >
             Fila
           </button>
-          {/* Only in the row: one category at a time. The chip shows the short name ("SaaS", not "SaaS /
-              Software B2B"); a clear native select covers it, so phones get their own picker. */}
-          {layout === "row" && rowCats.length > 1 && (
-            <label className="bar-btn hd-btn row-cat" data-on={rowCat !== null}>
-              {rowCat ? categoryLabel(rowCat)?.split(" / ")[0] : "Todas"}
-              <select value={rowCat ?? ""} aria-label="Categoría de la fila" onChange={(e) => pickRowCat(e.target.value || null)}>
-                <option value="">Todas</option>
-                {rowCats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-              </select>
-            </label>
-          )}
           <button
             type="button" className="bar-btn" data-sound aria-pressed={sound} onClick={toggleSound}
             aria-label="Sonido" title={sound ? "Silenciar" : "Activar sonido"}
@@ -827,6 +819,69 @@ function Ranking({ list, likesOf, onPick }: {
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * Category filter: a chip in the corner pill with the short name ("SaaS", not "SaaS / Software B2B"), and a
+ * glass list under it, like the ranking: name and flag count, a check on the current one. Works in the hall
+ * and in the row. Escape, a pick, or a click outside closes it.
+ */
+function CategoryMenu({ list, cats, value, onPick }: {
+  list: PublicStartup[]; cats: readonly { key: string; label: string }[]; value: string | null; onPick: (cat: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!root.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // Escape closes the menu, not the flag card under it
+      setOpen(false);
+      root.current?.querySelector<HTMLButtonElement>(".cat-chip")?.focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+  const count = (key: string | null) => (key === null ? list.length : list.filter((s) => s.category === key).length);
+  const rows = [{ key: null, label: "Todas" }, ...cats];
+  return (
+    <div className="cat-menu" ref={root}>
+      <button
+        type="button" className="bar-btn hd-btn cat-chip" aria-pressed={value !== null} aria-expanded={open} aria-haspopup="true"
+        aria-label={`Categoría: ${value ? categoryLabel(value) : "todas"}`} onClick={() => setOpen(!open)}
+      >
+        {/* Phones show the funnel alone: the top row has no room for a name beside the search. */}
+        <span className="cat-chip-label">{value ? categoryLabel(value)?.split(" / ")[0] : "Todas"}</span>
+        <Icon name="down" size={11} />
+        <Icon name="filter" size={14} />
+      </button>
+      {/* The list lives outside the corner pill: glass inside glass only blurs the pill, not the scene. */}
+      {open && root.current?.closest(".salon") && createPortal(
+        <div className="cat-list" role="group" aria-label="Categoría" ref={menu}>
+          {rows.map((c) => (
+            <button
+              key={c.key ?? "all"} type="button" aria-pressed={value === c.key} autoFocus={value === c.key}
+              onClick={() => { onPick(c.key); setOpen(false); }}
+            >
+              <span className="cat-name">{c.label}</span>
+              <span className="cat-count">{count(c.key)}</span>
+              <span className="cat-check">{value === c.key && <Icon name="check" size={11} />}</span>
+            </button>
+          ))}
+        </div>,
+        root.current.closest(".salon")!,
+      )}
+    </div>
   );
 }
 

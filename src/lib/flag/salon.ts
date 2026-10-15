@@ -307,7 +307,7 @@ export class SalonScene {
   private slots: Slot[] = [];
   private hallLayout: Slot[] = []; // the hall's seats, kept while the row view shows
   private layout: Layout = "hall";
-  private rowCategory: string | null = null; // the row shows only this category; null shows every flag
+  private category: string | null = null; // only this category's flags show, in either layout; null shows all
   private rowCenters: { x: number; s: number }[] = []; // cloth centers left to right, for the row camera
   private rowPan = false; // the opening slide along the row runs until any input
   private cols = 10;
@@ -515,7 +515,11 @@ export class SalonScene {
    * above the row in front. A second call moves the flag to the new slot and keeps its paint.
    */
   claimSlot(slot = this.poled) {
-    if (this.layout === "row") this.applyLayout("hall"); // the hoist happens in the hall
+    // The hoist happens in the whole hall: no row, no filter.
+    if (this.layout === "row" || this.category !== null) {
+      this.category = null;
+      this.applyLayout("hall");
+    }
     if (slot < this.poled || !this.slots[slot]) slot = this.poled;
     const p = this.slots[slot];
     if (!p) return;
@@ -669,7 +673,7 @@ export class SalonScene {
   /** The hall's empty poles, in seat order: the tour visits them after the startups. */
   emptySlots(): number[] {
     const out: number[] = [];
-    if (this.layout === "row") return out; // the row shows only startups
+    if (this.layout === "row" || this.category !== null) return out; // the row and a filter show only startups
     for (let i = this.poled; i < this.slots.length; i++) out.push(i);
     return out;
   }
@@ -721,7 +725,7 @@ export class SalonScene {
    * have no hall flag to fly to: when none is on a pole, the first match opens in the showcase.
    */
   focusAny(indices: number[]) {
-    const onPole = indices.filter((i) => i < this.poled && !this.slots[i]?.hidden); // the row's filter hides some
+    const onPole = indices.filter((i) => i < this.poled && !this.slots[i]?.hidden); // the category filter hides some
     if (!onPole.length && indices.length) {
       this.focus(indices[0]);
       return;
@@ -809,20 +813,18 @@ export class SalonScene {
   // ---------- Row view ----------
 
   /**
-   * Switches between the hall and the row view. In the row, `category` keeps only that category's flags,
-   * still in seat order. A quick fade hides the cut.
+   * Switches between the hall and the row view. `category` keeps only that category's flags, in either view;
+   * null shows them all. A quick fade hides the cut.
    */
   setLayout(mode: Layout, category: string | null = null) {
-    if (mode !== "row") category = null;
-    if (mode === this.layout && category === this.rowCategory) return;
+    if (mode === this.layout && category === this.category) return;
     this.cut(() => {
-      this.rowCategory = category;
+      this.category = category;
       this.applyLayout(mode);
     });
   }
 
   private applyLayout(mode: Layout) {
-    if (mode === "hall") this.rowCategory = null;
     this.leaveShowcase();
     if (mode === "row" && this.claim) this.dropClaim();
     this.layout = mode;
@@ -858,17 +860,20 @@ export class SalonScene {
 
   /** Slots for the current layout, and the row camera's cloth centers. */
   private setSlots() {
+    // The category filter. If the category empties out, every flag shows.
+    const poled = this.list.slice(0, this.poled);
+    let keep = poled.flatMap((s, i) => (this.category === null || s.category === this.category ? [i] : []));
+    if (!keep.length) keep = poled.map((_, i) => i);
     if (this.layout === "row") {
-      // A category filter sizes its flags against each other. If the category empties out, the row shows all.
-      const poled = this.list.slice(0, this.poled);
-      let keep = poled.flatMap((s, i) => (this.rowCategory === null || s.category === this.rowCategory ? [i] : []));
-      if (!keep.length) keep = poled.map((_, i) => i);
+      // The row sizes the kept flags against each other.
       const row = rowSlots(keep.map((i) => poled[i].likes));
       this.slots = poled.map((): Slot => ({ x: 0, z: ROW_Z, side: 1, hidden: true }));
       keep.forEach((i, k) => (this.slots[i] = row[k]));
       this.rowCenters = row.map((p) => ({ x: p.x + ((p.s ?? 1) * FLAG_W) / 2, s: p.s ?? 1 })).sort((a, b) => a.x - b.x);
     } else {
-      this.slots = this.hallLayout;
+      // The hall keeps every seat in place and hides the rest. A filtered hall hides its empty poles too.
+      const shown = new Set(keep), all = shown.size === poled.length;
+      this.slots = all ? this.hallLayout : this.hallLayout.map((p, i) => (shown.has(i) ? p : { ...p, hidden: true }));
       this.rowCenters = [];
     }
   }
