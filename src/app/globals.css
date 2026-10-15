@@ -463,7 +463,8 @@ h1, h2 { text-wrap: balance; }
 .salon-card-name { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
 .salon-card-name .ico { flex: none; color: var(--muted); }
 @media (hover: hover) and (pointer: fine) { .salon-card-name:hover { text-decoration: underline; text-underline-offset: 2px; } }
-.salon-card-close { position: absolute; top: 8px; right: 8px; color: var(--ink); }
+/* Above the body: its swap-in animation makes a stacking context that would otherwise paint over the ×. */
+.salon-card-close { position: absolute; z-index: 1; top: 8px; right: 8px; color: var(--ink); }
 .salon-card-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
 .salon-card-actions .text-link { display: inline-flex; align-items: center; gap: 4px; }
 /* Flag by flag: arrows inside the card while one is open, a pill at the bottom while none is. */
