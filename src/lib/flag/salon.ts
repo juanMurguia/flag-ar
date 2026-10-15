@@ -108,8 +108,8 @@ const HALL_INNER = 4.5; // m from the axis to the center of the inner cloths
 const HALL_DX = 4.5; // m between neighbors in a row: a cloth is 3.1 wide, so a gap of about 1.4 m
 const HOVER_GLOW = 0.1;
 
-// Row view: every flag in one line, fewest likes on the left, most on the right, each one sized by its likes,
-// like a "size comparison" video. The camera slides along the row and pulls back as the flags grow.
+// Row view: every flag in one line, most likes on the left, fewest on the right, each one sized by its likes,
+// like a "size comparison" video. The camera slides along the row and comes closer as the flags shrink.
 const ROW_Z = FIRST_Z;
 // Flag scale at zero likes and at the most likes. Not smaller: about 3 m of crag shows above the clouds
 // whatever its scale, and under a smaller flag it reads as a wall.
@@ -118,7 +118,7 @@ const ROW_GAP = 1.6; // m of sky between two cloths, times the bigger one's scal
 // Flags scale around this height, so every crag top stays just over the clouds whatever the size.
 const ROW_PIVOT = CLOUD_TOP;
 const ROW_CRAG_DEPTH = 0.3; // crag height below its top in the row view, against the hall's
-const ROW_PAN = 6; // m/s per unit of scale: the opening slide from the smallest flag to the biggest
+const ROW_PAN = 6; // m/s per unit of scale: the opening slide from #1 down the row
 const ROW_DIST_MIN = 28; // m from the row: the hall start view's distance to its front row, where the clouds hide the crags' feet
 
 export type Layout = "hall" | "row";
@@ -219,20 +219,20 @@ export function hallSlots(n: number, perSide: number): Slot[] {
 }
 
 /**
- * The row view. `likes` is in seat order (index 0 has the most). Fewest likes stand on the left, most on the
- * right. Scale follows log(likes), so one big flag does not flatten the rest; it never shrinks to the right,
- * even when a visitor's own like reordered the seats before the counts caught up. The row centers on x = 0.
+ * The row view. `likes` is in seat order (index 0 has the most), and the row keeps that order: most likes
+ * on the left, fewest on the right. Scale follows log(likes), so one big flag does not flatten the rest; it
+ * never grows to the right, even when a visitor's own like reordered the seats before the counts caught up.
+ * The row centers on x = 0.
  */
 export function rowSlots(likes: number[]): Slot[] {
   const n = likes.length;
   const top = Math.log1p(Math.max(0, ...likes));
   const out: Slot[] = new Array(n);
-  let x = 0, prev = 0, last = 0;
-  for (let j = 0; j < n; j++) {
-    const i = n - 1 - j;
+  let x = 0, prev = 0, last = Infinity;
+  for (let i = 0; i < n; i++) {
     const raw = top > 0 ? ROW_MIN + ((ROW_MAX - ROW_MIN) * Math.log1p(Math.max(0, likes[i]))) / top : 1;
-    const s = Math.max(raw, last);
-    if (j > 0) x += prev * FLAG_W + ROW_GAP * s;
+    const s = Math.min(raw, last);
+    if (i > 0) x += prev * FLAG_W + ROW_GAP * prev;
     out[i] = { x, z: ROW_Z, side: 1, s };
     prev = last = s;
   }
@@ -755,7 +755,7 @@ export class SalonScene {
     this.setHighlight([]);
     const go = () => {
       if (this.layout === "row") {
-        const v = this.rowView(this.rowEnd());
+        const v = this.rowView(this.rowStart());
         this.flyTo(v.pos, v.look, null);
       } else this.flyTo(START.clone(), this.lookFrom(START, START_YAW, START_PITCH), null);
     };
@@ -828,9 +828,9 @@ export class SalonScene {
       this.events.onHover?.(null);
     }
     if (mode === "row") {
-      // Like the videos: start on the smallest flag and slide to the biggest. Reduced motion starts at the end.
+      // Start on #1 and slide down the row. Reduced motion stays on #1.
       const c = this.rowCenters;
-      this.goalPos.x = this.reducedMotion() || !c.length ? this.rowEnd() : c[0].x;
+      this.goalPos.x = this.rowStart();
       this.clampPos();
       this.pos.copy(this.goalPos);
       this.aimRow();
@@ -856,7 +856,12 @@ export class SalonScene {
     }
   }
 
-  /** The biggest flag's center: where the row view rests. */
+  /** #1's center, the biggest flag, on the left: where the row view starts and rests. */
+  private rowStart() {
+    return this.rowCenters[0]?.x ?? 0;
+  }
+
+  /** The last flag's center, on the right: where the opening slide stops. */
   private rowEnd() {
     return this.rowCenters.at(-1)?.x ?? 0;
   }

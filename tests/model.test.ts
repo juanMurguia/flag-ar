@@ -85,17 +85,17 @@ describe("salon layout", () => {
     const [a, , , , , , b] = hallSlots(7, 3);
     expect(Math.abs(b.x - a.x)).toBeCloseTo(4.5 / 2);
   });
-  it("lines the row up from fewest likes (left) to most (right), growing", () => {
+  it("lines the row up from most likes (left) to fewest (right), shrinking", () => {
     const row = rowSlots([90, 40, 40, 3, 0]); // seat order: most likes first
     const xs = row.map((p) => p.x), ss = row.map((p) => p.s!);
-    for (let i = 1; i < row.length; i++) expect(xs[i]).toBeLessThan(xs[i - 1]);
+    for (let i = 1; i < row.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1]);
     for (let i = 1; i < row.length; i++) expect(ss[i]).toBeLessThanOrEqual(ss[i - 1]);
     expect(ss[1]).toBe(ss[2]); // a tie is the same size
-    expect(xs[4] + (xs[0] + ss[0] * 3.1)).toBeCloseTo(0); // centered on the axis
+    expect(xs[0] + (xs[4] + ss[4] * 3.1)).toBeCloseTo(0); // centered on the axis
     // Cloths never overlap: each starts after the one to its left ends.
-    for (let i = 1; i < row.length; i++) expect(xs[i - 1]).toBeGreaterThan(xs[i] + ss[i] * 3.1);
+    for (let i = 1; i < row.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1] + ss[i - 1] * 3.1);
   });
-  it("sizes every flag the same when nobody has likes, and never shrinks to the right", () => {
+  it("sizes every flag the same when nobody has likes, and never grows to the right", () => {
     expect(new Set(rowSlots([0, 0, 0]).map((p) => p.s)).size).toBe(1);
     const odd = rowSlots([5, 6, 1]); // a visitor's like reordered seats before the counts caught up
     expect(odd[0].s!).toBeGreaterThanOrEqual(odd[1].s!);

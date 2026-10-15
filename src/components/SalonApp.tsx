@@ -521,7 +521,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
         <div className="salon-corner">
           <button
             type="button" className="bar-btn hd-btn" aria-pressed={layout === "row"} onClick={toggleLayout}
-            aria-label="Ver en fila" title={layout === "row" ? "Volver al salón" : "Todas en fila, de menos a más likes"}
+            aria-label="Ver en fila" title={layout === "row" ? "Volver al salón" : "Todas en fila, de más a menos likes"}
           >
             Fila
           </button>
