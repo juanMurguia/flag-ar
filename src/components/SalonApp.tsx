@@ -91,6 +91,17 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     };
   }, [view]);
   const [picked, setPicked] = useState<PublicStartup | null>(null);
+  // The tour also stops at the empty poles: the slot the camera stands at, with its own small card.
+  const [freePick, setFreePick] = useState<number | null>(null);
+  // Phones and touch screens: shorter hint, the wallpaper at phone size.
+  const [touch, setTouch] = useState(false);
+  useEffect(() => {
+    const m = window.matchMedia("(max-width: 640px), (pointer: coarse)");
+    const on = () => setTouch(m.matches);
+    on();
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
   // Hover label: what the flag under the mouse is. It follows the mouse through a ref, not state, so a
   // mouse move does not re-render the page.
   const [hovered, setHovered] = useState<{ kind: "startup" | "placeholder"; index: number } | null>(null);
@@ -147,6 +158,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     }
     hoistSlot.current = slot;
     setPicked(null);
+    setFreePick(null);
     if (location.pathname === "/izar") s.claimSlot(slot); // already open: another empty pole takes the flag
     else history.pushState(null, "", "/izar");
   }, [router]);
@@ -255,7 +267,10 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       if (cancelled || !holder.current) return;
       const startHigh = savedHigh() ?? mod.defaultFx().ao;
       s = new mod.SalonScene(holder.current, {
-        onSelect: (i) => setPicked(i === null ? null : listRef.current[i] ?? null),
+        onSelect: (i) => {
+          setPicked(i === null ? null : listRef.current[i] ?? null);
+          if (i !== null) setFreePick(null);
+        },
         onPlaceholder: (slot) => openRef.current(slot),
         onFx: () => setHigh(false), // auto drop on a slow GPU: shown, not saved
         onHover: (t) => setHovered(t),
@@ -280,20 +295,33 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     scene.current?.setStartups(listRef.current);
   }, [layoutKey]);
 
-  // Flag by flag: the arrows (on screen, and ← → on the keyboard) fly to the next or previous startup, in
-  // seat order: front to back, left and right in turn. Without a flag picked, › starts at the first one.
+  // Flag by flag: the arrows (on screen, and ← → on the keyboard) visit every startup in seat order (front
+  // to back, left and right in turn), then every empty pole. With one startup the tour still goes somewhere:
+  // the empty poles are where the next ones fly. Without a stop picked, › starts at the first one.
   const navRef = useRef<number | null>(null);
   if (picked) {
     const i = all.findIndex((x) => x.id === picked.id);
     if (i >= 0) navRef.current = i;
   }
+  const freeSlots = (view === "3d" && scene.current?.emptySlots()) || [];
+  if (freePick !== null && freeSlots.includes(freePick)) navRef.current = all.length + freeSlots.indexOf(freePick);
+  const stops = all.length + freeSlots.length;
   const step = useCallback((d: 1 | -1) => {
-    const s = scene.current, n = listRef.current.length;
-    if (!s || !n) return;
+    const s = scene.current;
+    if (!s) return;
+    const n = listRef.current.length, free = s.emptySlots(), total = n + free.length;
+    if (!total) return;
     const cur = navRef.current;
-    const next = cur === null ? (d > 0 ? 0 : n - 1) : (cur + d + n) % n;
+    const next = cur === null ? (d > 0 ? 0 : total - 1) : (cur + d + total) % total;
     navRef.current = next;
-    s.focus(next);
+    if (next < n) {
+      setFreePick(null);
+      s.focus(next);
+    } else {
+      setPicked(null);
+      setFreePick(free[next - n]);
+      s.focusSlot(free[next - n]);
+    }
   }, []);
   useEffect(() => {
     if (view !== "3d" || hoist !== "closed") return;
@@ -312,17 +340,18 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   // up stranded somewhere in the hall.
   const closeCard = useCallback(() => {
     setPicked(null);
+    setFreePick(null);
     navRef.current = null;
     scene.current?.home();
   }, []);
   useEffect(() => {
-    if (!picked) return;
+    if (!picked && freePick === null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !(e.target as HTMLElement | null)?.closest?.("input, textarea, select")) closeCard();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [picked, closeCard]);
+  }, [picked, freePick, closeCard]);
 
   // Search results fly to the flag in 3D (its card opens on arrival). The fallback list opens the page.
   function go(s: PublicStartup) {
@@ -386,7 +415,9 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     if (!s || !shown || i < 0 || wallpaperBusy) return;
     setWallpaperBusy(true);
     try {
-      saveBlob(await s.wallpaper(i, 3840, 2160), `wallpaper-4k-${shown.slug}.jpg`);
+      // Phones get a phone wallpaper: their own screen shape, and a fifth of the 4K render's memory.
+      if (touch) saveBlob(await s.wallpaper(i, 1170, 2532), `wallpaper-celu-${shown.slug}.jpg`);
+      else saveBlob(await s.wallpaper(i, 3840, 2160), `wallpaper-4k-${shown.slug}.jpg`);
     } finally {
       setWallpaperBusy(false);
     }
@@ -398,7 +429,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   );
 
   return (
-    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}`}>
+    <main className={`salon${view === "grid" ? " grid-mode" : ""}${hoist === "open" ? " hoisting" : ""}${shown || freePick !== null ? " card-open" : ""}`}>
       {view === "3d" && <div ref={holder} className="salon-holder" />}
       {/* Shown while the scene code loads and the first frames compile shaders. Fades out with the canvas fade-in. */}
       {view === "3d" && (
@@ -417,7 +448,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         <label className="search">
           <Icon name="search" size={13} />
           <input
-            type="search" placeholder={`Buscá entre ${countLabel} por nombre o categoría`} value={query}
+            type="search" placeholder={touch ? `Buscar entre ${countLabel}` : `Buscá entre ${countLabel} por nombre o categoría`} value={query}
             onChange={(e) => setQuery(e.target.value)} aria-label="Buscar startup por nombre o categoría"
           />
         </label>
@@ -478,22 +509,28 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
               <Icon name="heart" size={13} />
               <span>{likesOf(shown).toLocaleString("es-AR")}</span>
             </button>
-            {all.length > 1 && (
-              <div className="salon-card-nav">
-                <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
-                  <Icon name="prev" size={14} />
-                </button>
-                <span>{(all.findIndex((x) => x.id === shown.id) + 1) || "–"} / {all.length}</span>
-                <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
-                  <Icon name="next" size={14} />
-                </button>
-              </div>
-            )}
+            {stops > 1 && <CardNav at={(all.findIndex((x) => x.id === shown.id) + 1) || null} of={stops} step={step} />}
             <div className="salon-card-actions">
               <Link className="text-link" href={`/${shown.slug}`}>Ver bandera</Link>
               <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
-                {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>Fondo 4K <Icon name="download" size={12} /></>}
+                {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
               </button>
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {view === "3d" && freePick !== null && !shown && hoist === "closed" && (
+        <aside className="salon-card" aria-labelledby="salon-free-name" data-state="open">
+          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar">
+            <Icon name="close" size={13} />
+          </button>
+          <div className="salon-card-body" key={`free-${freePick}`}>
+            <h2 id="salon-free-name">Mástil libre</h2>
+            <p className="salon-card-text">Tu startup puede flamear acá, al lado de la bandera argentina.</p>
+            {stops > 1 && <CardNav at={all.length + freeSlots.indexOf(freePick) + 1} of={stops} step={step} />}
+            <div className="salon-card-actions">
+              <button type="button" className="nav-cta" onClick={() => openHoist(freePick)}>Izar mi bandera acá</button>
             </div>
           </div>
         </aside>
@@ -528,11 +565,13 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
       )}
 
       {view === "3d" && hint && hoist === "closed" && (
-        <p className="salon-hint" role="status">Tocá una bandera para verla · Arrastrá para mirar alrededor</p>
+        <p className="salon-hint" role="status">
+          {touch ? "Tocá una bandera · Arrastrá para mirar" : "Tocá una bandera para verla · Arrastrá para mirar alrededor"}
+        </p>
       )}
 
       {/* No flag picked: the tour starts here. With a card open, its own arrows take over. */}
-      {view === "3d" && !shown && hoist === "closed" && (
+      {view === "3d" && !shown && freePick === null && hoist === "closed" && (
         <nav className="salon-nav" aria-label="Recorrer las banderas">
           {all.length > 0 && (
             <>
@@ -575,6 +614,21 @@ const RANK_SIZE = 10;
 const RANK_FOLDED = 3;
 
 /** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
+/** The tour's arrows inside a card: previous, "2 / 4", next. */
+function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 | -1) => void }) {
+  return (
+    <div className="salon-card-nav">
+      <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Anterior">
+        <Icon name="prev" size={14} />
+      </button>
+      <span>{at ?? "–"} / {of}</span>
+      <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Siguiente">
+        <Icon name="next" size={14} />
+      </button>
+    </div>
+  );
+}
+
 function Ranking({ list, likesOf, onPick }: {
   list: PublicStartup[]; likesOf: (s: PublicStartup) => number; onPick: (s: PublicStartup) => void;
 }) {

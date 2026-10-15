@@ -589,8 +589,28 @@ export class SalonScene {
     });
   }
 
+  /** The hall's empty poles, in seat order: the tour visits them after the startups. */
+  emptySlots(): number[] {
+    const out: number[] = [];
+    for (let i = this.poled; i < this.slots.length; i++) out.push(i);
+    return out;
+  }
+
+  /** Flies to empty pole `slot` (the tour), leaving the showcase first if it is open. No selection event. */
+  focusSlot(slot: number) {
+    if (!this.slots[slot]) return;
+    this.setHighlight([]);
+    const go = () => this.flyToFlag(slot, null);
+    if (this.showing >= 0) {
+      this.cut(() => {
+        this.leaveShowcase();
+        go();
+      });
+    } else go();
+  }
+
   /** Flies through the hall to stand in front of startup flag `i`, and reports the selection on arrival. */
-  private flyToFlag(i: number) {
+  private flyToFlag(i: number, select: number | null = i) {
     const p = this.slots[i];
     if (!p) return;
     // Frame the flag at about half the screen width, whatever the lens and the screen shape: on the long lens
@@ -604,7 +624,7 @@ export class SalonScene {
     const stand = new THREE.Vector3(center.x - p.side * 1.5, center.y + 2.6, p.z + dist);
     // Aim a touch to the right of the flag on wide screens, so it sits left of center, clear of the card.
     const look = center.clone().add(new THREE.Vector3(this.camera.aspect > 1 ? 0.8 : 0, 0, 0));
-    this.flyTo(stand, look, i);
+    this.flyTo(stand, look, select);
   }
 
   /** Glows these startup flags (search, city filter), the ones on a hall pole. Empty clears. */
@@ -859,12 +879,15 @@ export class SalonScene {
     const left = ARG_X, right = SHOW_X + ARG_W * 1.05;
     const look = new THREE.Vector3((left + right) / 2, ARG_POLE_H - ARG_H * 0.55, ARG_Z);
     const halfW = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect);
-    const fill = aspect < 1 ? 0.92 : 0.75; // portrait: as wide as it goes, the pair is wide
+    const fill = aspect < 1 ? 0.84 : 0.75; // portrait: nearly the full width, with a margin so no pole touches the edge
     const dist = Math.max(18, (right - left) / fill / (2 * Math.tan(halfW)));
     // The eye stands square in front of the Argentine flag, as in the start view: the low sun sits right
     // behind the hero's cloth and shines through it. Between the two flags, it washes the whole frame out.
+    // Portrait is the exception: from there the oblique view cut the hero off the left edge, so the eye moves
+    // to the middle of the pair.
     // High enough to clear the billows: lower, the eye sinks into a cloud and the frame turns to haze.
-    return { pos: new THREE.Vector3(ARG_CENTER.x, SHOW_EYE_Y, ARG_Z + dist), look };
+    const x = aspect < 1 ? look.x : ARG_CENTER.x;
+    return { pos: new THREE.Vector3(x, SHOW_EYE_Y, ARG_Z + dist), look };
   }
 
   /**

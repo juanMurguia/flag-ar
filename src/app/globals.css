@@ -530,7 +530,7 @@ h1, h2 { text-wrap: balance; }
 @media (hover: hover) and (pointer: fine) { .ranking-more:hover { color: var(--ink); } }
 /* Phones: under the bar, so it never covers the search. */
 @media (max-width: 640px) {
-  .ranking { top: calc(max(12px, env(safe-area-inset-top)) + 64px); width: 172px; }
+  .ranking { top: calc(max(12px, env(safe-area-inset-top)) + 76px); width: 172px; }
 }
 /* Like: a pill in the flag card. Filled heart once this device liked the flag. */
 .like-btn {
@@ -583,6 +583,40 @@ h1, h2 { text-wrap: balance; }
 @media (max-width: 640px) { .salon-nav-label { display: none; } }
 @media (max-width: 640px) {
   .salon-card { left: 16px; right: 16px; width: auto; transform-origin: bottom center; }
+}
+/* An empty pole's card: one line of copy and the hoist button. */
+.salon-card-text { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); padding-right: 24px; }
+.salon-card .nav-cta { border: 0; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+
+/* Touch screens: the tour's arrows and the call to action at 44 px, the size a thumb hits without aiming.
+   The top row grows to 36 px together (search and corner), so it still reads as one line. */
+@media (pointer: coarse) {
+  .salon-nav .bar-btn, .salon-card-nav .bar-btn { width: 44px; height: 44px; }
+  .salon-nav .nav-cta, .salon-card .nav-cta { height: 44px; padding: 0 16px 0 12px; font-size: 13px; }
+  .salon-card-close { width: 40px; height: 40px; top: 4px; right: 4px; }
+  .search { height: 36px; }
+  .salon-corner .bar-btn { width: 36px; height: 36px; }
+}
+
+/* Phones: the tour is a dock across the bottom, arrows left, call to action right. The flag card is a
+   bottom sheet with the same arrows in a full-width row and its actions as real buttons. The ranking steps
+   aside while a card is open: on a narrow screen it would cover the flag. */
+@media (max-width: 640px) {
+  .salon-nav { left: 12px; right: 12px; translate: none; justify-content: flex-start; bottom: max(12px, env(safe-area-inset-bottom)); }
+  .salon-nav .nav-cta { margin-left: auto; }
+  .salon-card { left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); padding: 16px; gap: 6px; }
+  .salon-card-nav {
+    justify-content: space-between; margin-top: 8px; padding: 0; border-radius: 999px; background: rgba(0, 0, 0, 0.05);
+    font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .salon-card-actions { gap: 8px; margin-top: 8px; }
+  .salon-card-actions .text-link {
+    height: 40px; padding: 0 14px; border-radius: 999px; font-size: 13px;
+    background: rgba(255, 255, 255, 0.55); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  }
+  .salon-card-actions .nav-cta { flex: 1; justify-content: center; }
+  .salon.card-open .ranking { display: none; }
+  .salon-hint { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 66px); width: auto; white-space: nowrap; }
 }
 
 /* Hoisting in the hall: the sheet takes the right side, and the bar slides to the middle of what is left,
