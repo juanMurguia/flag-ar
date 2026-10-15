@@ -11,6 +11,15 @@ import { Ambience } from "@/lib/flag/ambience";
 import { xIntent } from "./Share";
 import Icon from "./Icon";
 import { useLikes } from "./useLikes";
+import { toast } from "./Toast";
+
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
+
+/** HTML for the startup's rank badge: works on a website and in a GitHub README. */
+function badgeHtml(s: PublicStartup) {
+  const alt = `${s.name} en el ranking de flag.ar`.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  return `<a href="${SITE}/${s.slug}"><img src="${SITE}/${s.slug}/badge.svg" alt="${alt}" height="28"></a>`;
+}
 
 const POLL_MS = 30_000;
 const FX_KEY = "flagar-hq";
@@ -452,6 +461,16 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
     }
   }
 
+  async function copyBadge() {
+    if (!shown) return;
+    try {
+      await navigator.clipboard.writeText(badgeHtml(shown));
+      toast("Insignia copiada. Pegala en tu web o en tu README.");
+    } catch {
+      window.open(`/${shown.slug}/badge.svg`, "_blank", "noopener"); // clipboard blocked: show the badge itself
+    }
+  }
+
   const tweet = xIntent(
     `${query.trim()} todavía no flamea en el Salón de la Fama de las startups argentinas. ¿La izás? 🇦🇷 #FlagAR`,
     "https://flag.ar",
@@ -554,6 +573,12 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
             <div className="salon-card-actions">
               <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
                 {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
+              </button>
+              <button
+                type="button" className="text-link" onClick={copyBadge}
+                title="Tu puesto en vivo, para tu web o tu README"
+              >
+                Insignia <Icon name="copy" size={12} />
               </button>
             </div>
           </div>

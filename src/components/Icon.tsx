@@ -1,7 +1,7 @@
 // Lucide icons (ISC). Each import is one small inline SVG: no icon font, no runtime, and CSP stays strict.
 // Motion lives in globals.css ("Icon motion"): each icon plays a short CSS animation when its button is hovered or focused.
 import {
-  ArrowUpRight, Camera, ChevronLeft, ChevronRight, Download, Film, Heart, Pause, Play, Plus, Search, Trophy, Video, Volume2, VolumeX, X, type LucideIcon,
+  ArrowUpRight, Camera, ChevronLeft, ChevronRight, Copy, Download, Film, Heart, Pause, Play, Plus, Search, Trophy, Video, Volume2, VolumeX, X, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -21,6 +21,7 @@ const ICONS = {
   mute: VolumeX,
   heart: Heart,
   external: ArrowUpRight,
+  copy: Copy,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
