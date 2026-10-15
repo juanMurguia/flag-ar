@@ -8,11 +8,9 @@ import type { SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
-import { ShareButtons, xIntent } from "./Share";
+import { xIntent } from "./Share";
 import Icon from "./Icon";
 import { useLikes } from "./useLikes";
-
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://flag.ar").replace(/\/$/, "");
 
 const POLL_MS = 30_000;
 const FX_KEY = "flagar-hq";
@@ -503,10 +501,12 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
               <span>Bandera #{shown.order}</span>
               {categoryLabel(shown.category) && <span>· {categoryLabel(shown.category)}</span>}
             </p>
-            <h2 id="salon-card-name">{shown.name}</h2>
-            <a className="salon-card-link" href={shown.link} target="_blank" rel="noopener noreferrer nofollow">
-              {shown.domain.startsWith("x.com/") ? `@${shown.domain.slice(6)}` : shown.domain}
-            </a>
+            {/* The form asks for one link: the name is that link. */}
+            <h2 id="salon-card-name">
+              <a className="salon-card-name" href={shown.link} target="_blank" rel="noopener noreferrer nofollow">
+                {shown.name} <Icon name="external" size={14} />
+              </a>
+            </h2>
             {/* Like and arrows share one row: the card holds the whole flag page now, so it saves height. */}
             <div className="salon-card-row">
               <button
@@ -621,16 +621,13 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
 const RANK_SIZE = 10;
 const RANK_FOLDED = 3;
 
-/** The flag's data that used to live on its own page: share links, the wallpaper, and a change request. */
+/** The card's actions: the wallpaper and a change request. */
 function CardDetails({ startup, children }: { startup: PublicStartup; children: React.ReactNode }) {
   return (
-    <>
-      <ShareButtons name={startup.name} order={startup.order} url={`${SITE}/${startup.slug}`} />
-      <div className="salon-card-actions">
-        {children}
-        <Link className="text-link" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
-      </div>
-    </>
+    <div className="salon-card-actions">
+      {children}
+      <Link className="text-link" href={`/${startup.slug}/editar`} prefetch={false}>Pedir un cambio</Link>
+    </div>
   );
 }
 

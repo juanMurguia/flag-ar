@@ -460,7 +460,9 @@ h1, h2 { text-wrap: balance; }
 /* Picking another flag swaps the content in place; the card stays. */
 .salon-card-body { display: grid; gap: 4px; animation: swap-in 220ms var(--ease-out) both; }
 .salon-card h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; padding-right: 24px; }
-.salon-card-link { display: inline-flex; align-items: center; gap: 4px; width: fit-content; color: var(--muted); font-size: 12px; text-decoration: none; }
+.salon-card-name { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+.salon-card-name .ico { flex: none; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .salon-card-name:hover { text-decoration: underline; text-underline-offset: 2px; } }
 .salon-card-close { position: absolute; top: 8px; right: 8px; color: var(--ink); }
 .salon-card-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
 .salon-card-actions .text-link { display: inline-flex; align-items: center; gap: 4px; }
