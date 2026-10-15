@@ -90,6 +90,10 @@ const INTRO_PITCH = -0.05;
 const INTRO_DUR = 8; // s
 const YAW_LIMIT = 1.15; // rad either side of the corridor axis: you can look at the flags, never back
 const PITCH_MIN = -0.3, PITCH_MAX = 0.35;
+// Middle-button drag raises and lowers the eye, to see over the front rows. The top stays under the
+// Argentine flag's top, so the view never turns into a map.
+const EYE_MAX = 10;
+const LIFT_PER_PX = 0.03; // m of height per pixel of drag
 const EASE_MOVE = 4; // 1/s: how fast position catches its goal
 const EASE_LOOK = 9; // 1/s: how fast yaw and pitch catch theirs
 // Showcase orbit: the camera circles the pair, never turns away from it. Limits keep the sun behind the
@@ -313,7 +317,8 @@ export class SalonScene {
     from: THREE.Vector3; to: THREE.Vector3; yaw0: number; yaw1: number; p0: number; p1: number; t: number; dur: number;
     select: number | null; intro?: boolean;
   } | null = null;
-  private pointers = new Map<number, { x: number; y: number; sx: number; sy: number }>();
+  // `lift`: the middle mouse button, whose drag moves the eye up and down instead of turning it.
+  private pointers = new Map<number, { x: number; y: number; sx: number; sy: number; lift: boolean }>();
   private pinch = 0;
   private moved = false;
   private raycaster = new THREE.Raycaster();
@@ -1460,7 +1465,7 @@ export class SalonScene {
     const g = this.goalPos;
     g.x = Math.max(-w, Math.min(w, g.x));
     g.z = Math.max(end, Math.min(START.z + 8, g.z));
-    g.y = Math.max(CLOUD_TOP + 1.5, g.y);
+    g.y = THREE.MathUtils.clamp(g.y, CLOUD_TOP + 1.5, EYE_MAX);
   }
 
   private resize() {
@@ -1500,9 +1505,13 @@ export class SalonScene {
   }
 
   private bindInput(canvas: HTMLCanvasElement) {
+    // The middle button would start the browser's autoscroll.
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
     canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
-      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, lift: e.pointerType === "mouse" && e.button === 1 });
       this.moved = false;
       this.pinch = 0;
     });
@@ -1524,12 +1533,21 @@ export class SalonScene {
         this.pinch = d;
         return;
       }
+      if (p.lift) {
+        // Middle drag: up raises the eye, down lowers it. The showcase orbit has its own height.
+        canvas.style.cursor = "ns-resize";
+        if (this.showing >= 0) return;
+        this.goalPos.y -= dy * LIFT_PER_PX;
+        this.clampPos();
+        return;
+      }
       canvas.style.cursor = "grabbing";
       // Drag to look around.
       this.turn(dx * 0.0026, dy * 0.0022);
     });
     const end = (e: PointerEvent) => {
-      const had = this.pointers.delete(e.pointerId);
+      const lift = this.pointers.get(e.pointerId)?.lift;
+      const had = this.pointers.delete(e.pointerId) && !lift; // a middle click picks nothing
       canvas.style.cursor = "grab";
       this.pinch = 0;
       if (had && !this.moved && e.type === "pointerup") {
