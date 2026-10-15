@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Paths under /admin that a signed-out owner must reach to sign in.
@@ -47,21 +48,31 @@ async function gate(request: NextRequest) {
   );
 
   const { data: userData } = await supabase.auth.getUser();
-  if (PUBLIC_ADMIN.has(request.nextUrl.pathname)) {
+  const path = request.nextUrl.pathname;
+  if (PUBLIC_ADMIN.has(path)) {
+    // A signed-in admin skips the login form: the session cookies last 400 days.
+    if (path === "/admin/login" && userData.user && (await isFullAdmin(supabase))) {
+      const redirect = NextResponse.redirect(new URL("/admin", request.url));
+      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+      return redirect;
+    }
     response.headers.set("x-robots-tag", "noindex, nofollow");
     return response;
   }
   if (!userData.user) return notFound();
-
-  const { data: claims } = await supabase.auth.getClaims();
-  if (claims?.claims.aal !== "aal2") return notFound();
-
-  const { data: isAdmin } = await supabase.rpc("is_admin");
-  if (isAdmin !== true) return notFound();
+  if (!(await isFullAdmin(supabase))) return notFound();
 
   response.headers.set("x-robots-tag", "noindex, nofollow");
   response.headers.set("cache-control", "private, no-store");
   return response;
+}
+
+/** True when the session has passed TOTP (aal2) and the user is an admin. */
+async function isFullAdmin(supabase: SupabaseClient) {
+  const { data: claims } = await supabase.auth.getClaims();
+  if (claims?.claims.aal !== "aal2") return false;
+  const { data: isAdmin } = await supabase.rpc("is_admin");
+  return isAdmin === true;
 }
 
 export const config = {
