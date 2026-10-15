@@ -119,7 +119,10 @@ export function applyFinish(ctx: CanvasRenderingContext2D, w: number, h: number,
         b += s * 0.5;
       }
       if (o.halation > 0) {
-        const hl = halo.at(u, v, 0) * 0.5 + halo.at(u, v, 1) * 0.5;
+        // Only the glow that spills past a bright area, not over it: a light cloth keeps its folds and
+        // edges, and the red fringe lands on the darker side of each bright edge, as on film.
+        const own = Math.max(0, (Math.max(r, g, b) - o.halationThreshold) / (1 - o.halationThreshold));
+        const hl = Math.max(0, halo.at(u, v, 0) * 0.5 + halo.at(u, v, 1) * 0.5 - own);
         r += hl * o.halation * 1.0;
         g += hl * o.halation * 0.36;
         b += hl * o.halation * 0.12;
