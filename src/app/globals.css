@@ -507,7 +507,7 @@ h1, h2 { text-wrap: balance; }
   text-shadow: 0 0 8px rgba(255, 244, 228, 0.9); pointer-events: none;
   animation: fade 600ms var(--ease-out) 500ms both;
 }
-/* Ranking: a small glass list in the top-left corner. Position, name, likes. Three rows, "Ver más" for ten. */
+/* Ranking: a small glass list in the top-left corner. Position, name, likes. Three rows, "Ver más" for all. */
 .ranking {
   position: absolute; z-index: 2; top: max(12px, env(safe-area-inset-top)); left: 12px;
   width: 196px; padding: 8px 6px 6px; border-radius: var(--radius-lg); color: var(--ink); --muted: #3d3d3d;

@@ -623,10 +623,8 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   );
 }
 
-const RANK_SIZE = 10;
 const RANK_FOLDED = 3;
 
-/** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
 /** The tour's arrows inside a card: previous, "2 / 4", next. */
 function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 | -1) => void }) {
   return (
@@ -642,6 +640,7 @@ function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 
   );
 }
 
+/** Every startup by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
 function Ranking({ list, likesOf, onPick }: {
   list: PublicStartup[]; likesOf: (s: PublicStartup) => number; onPick: (s: PublicStartup) => void;
 }) {
@@ -649,8 +648,7 @@ function Ranking({ list, likesOf, onPick }: {
   // Same rule as the seats (bySeat), with the visitor's own likes already counted.
   const top = useMemo(
     () => list.map((s) => ({ s, likes: likesOf(s) }))
-      .sort((a, b) => bySeat({ likes: a.likes, order: a.s.order }, { likes: b.likes, order: b.s.order }))
-      .slice(0, RANK_SIZE),
+      .sort((a, b) => bySeat({ likes: a.likes, order: a.s.order }, { likes: b.likes, order: b.s.order })),
     [list, likesOf],
   );
   if (!top.length) return null;
