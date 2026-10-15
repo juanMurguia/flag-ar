@@ -18,7 +18,7 @@ import { CLOTH_NORMAL_REPEAT, applyBacklight, applyRim, applySunRim, clothNormal
 import { farCrags, poleIsland, stoneMaterial } from "./islands";
 import { Motes } from "./motes";
 import { buildPole, poleMaterials } from "./pole";
-import { Post, type PostFx } from "./post";
+import { Post, type PostFx, type StillFocus } from "./post";
 import { SunsetSky, sunDirection } from "./sunsetSky";
 import { clothFinish, createCanvas, drawArgentineFlag, drawPlaceholderFlag, drawStartupFlag, prepareLogo, type LogoImage } from "./texture";
 import { flagGeometry } from "./wave";
@@ -126,6 +126,9 @@ function halton(i: number, base: number) {
   return r;
 }
 
+const SCREEN_CENTER = new THREE.Vector2(0, 0);
+const FOCUS_DIR = new THREE.Vector3();
+
 type Tier = "high" | "low";
 const TIERS = {
   high: { steps: 72, cloth: [30, 19] as const, motes: 450, shadows: true },
@@ -146,7 +149,7 @@ function startTier(): Tier {
 /** Default effects for this device: everything on desktops, only bloom on phones. */
 export function defaultFx(): SalonFx {
   const high = startTier() === "high";
-  return { ao: high, bloom: true, godRays: high, hd: high };
+  return { ao: high, bloom: true, godRays: high, hd: high, cinema: high };
 }
 
 export interface SalonEvents {
@@ -267,6 +270,11 @@ export class SalonScene {
   private argUniforms: BacklightUniforms;
   private argCloth: ClothSim | null = null;
   private argGeo: THREE.BufferGeometry | null = null;
+  private argFlag: THREE.Mesh | null = null;
+  // Cinema mode's live focus: Post reads this object every frame; updateFocus moves it.
+  private liveFocus: StillFocus = { target: ARG_CENTER.clone(), range: 40, bokeh: 6 };
+  private focusGoal = ARG_CENTER.clone();
+  private focusTick = 0;
   private images = new Map<string, LogoImage | "loading" | "error">();
   private lodTimer = 0;
   private knownIds: Set<string> | null = null;
@@ -373,6 +381,7 @@ export class SalonScene {
     this.scene.add(farCrags(this.stone, START));
 
     this.post = new Post(renderer, this.scene, this.camera, this.sky.raySun, this.fx, this.backdrop, BACKDROP_SCALE);
+    this.post.setLiveFocus(this.liveFocus);
     this.intro();
 
     this.resize();
@@ -894,7 +903,7 @@ export class SalonScene {
     this.sky.update(this.time, this.camera);
     this.clouds.update(this.time, this.camera);
     // A still has no frame budget: every effect on at its top quality, whatever the visitor picked.
-    this.post.setFx({ ao: true, bloom: true, godRays: true });
+    this.post.setFx({ ao: true, bloom: true, godRays: true, cinema: false }); // the CPU finish grades the still
     // Focus on the two flags; the sky and the far cloud sea fall out of focus. The camera sees the startup's
     // flag at an angle, so its far end is well past the focus point: under ~1.5 times the distance, that end
     // went soft (a light cloth melted into the sky). The sky and the horizon still go soft at 1.5.
@@ -1026,6 +1035,7 @@ export class SalonScene {
     this.argGeo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
     this.argCloth = new ClothSim(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1], ARG_CLOTH);
     const flag = new THREE.Mesh(this.argGeo, mat);
+    this.argFlag = flag;
     flag.frustumCulled = false;
     flag.castShadow = true;
     flag.position.set(ARG_X + ARG_POLE_R + 0.03, ARG_POLE_H - 0.25, ARG_Z);
@@ -1221,12 +1231,41 @@ export class SalonScene {
     if (this.fpsChecks > 1 && fps < 45) {
       this.applyTier("low");
       // The costly effects go too. The UI shows it, and the visitor can switch them back on.
-      this.setFx({ ...this.fx, ao: false, godRays: false, hd: false });
+      this.setFx({ ...this.fx, ao: false, godRays: false, hd: false, cinema: false });
       this.events.onFx?.(this.fx);
     }
   }
 
   // ---------- Loop and camera ----------
+
+  /**
+   * Cinema mode's autofocus, like a camera operator pulling focus. The subject: the showcase pair, else
+   * the flag under the mouse, else the flag at the middle of the view (a ray, five times a second), else a
+   * point as far as the Argentine flag. The focus eases to it over about half a second.
+   */
+  private updateFocus(dt: number) {
+    if (!this.fx.cinema) return;
+    if (this.showing >= 0) {
+      this.focusGoal.copy(this.showcaseView(this.camera.aspect).look);
+    } else if (this.hovered >= 0 && this.flags[this.hovered]?.mesh.visible) {
+      this.flags[this.hovered].mesh.getWorldPosition(this.focusGoal);
+    } else if (--this.focusTick <= 0) {
+      this.focusTick = 12;
+      this.raycaster.setFromCamera(SCREEN_CENTER, this.camera);
+      const targets: THREE.Object3D[] = this.hall.visible ? this.flags.filter((f) => f.mesh.visible).map((f) => f.mesh) : [];
+      if (this.argFlag) targets.push(this.argFlag);
+      const hit = this.raycaster.intersectObjects(targets, false)[0];
+      if (hit) this.focusGoal.copy(hit.point);
+      else {
+        const d = this.camera.position.distanceTo(ARG_CENTER);
+        this.focusGoal.copy(this.camera.position).addScaledVector(this.camera.getWorldDirection(FOCUS_DIR), d);
+      }
+    }
+    this.liveFocus.target.lerp(this.focusGoal, 1 - Math.exp(-5 * dt));
+    this.liveFocus.range = this.camera.position.distanceTo(this.liveFocus.target) * STILL_FOCUS_RANGE;
+    // Bokeh is in pixels: scale the wallpaper's 16 at 2160 rows to this canvas.
+    this.liveFocus.bokeh = (STILL_BOKEH * this.renderer.domElement.height) / 2160;
+  }
 
   private lookFrom(from: THREE.Vector3, yaw: number, pitch: number) {
     return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)).add(from);
@@ -1335,6 +1374,7 @@ export class SalonScene {
       if (this.showing >= 0 && this.show?.painted !== "logo" && this.logoFor(this.showing)) this.paintShowcase();
       this.lodTimer = 0.25;
     }
+    this.updateFocus(dt);
     this.post.render(dt);
     // Fade in once real frames are on screen: the first ones compile shaders and can stall.
     if (++this.frames === 3) {

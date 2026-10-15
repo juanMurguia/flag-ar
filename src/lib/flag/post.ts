@@ -7,6 +7,7 @@
 //               rebuilds normals from it, so the waving cloth (vertex displacement) gets correct contact shade.
 // Pass 1, HDR:  exposure -> Bloom (mipmap blur, optional) -> God rays from the sun mesh (optional) -> ACES tone mapping.
 // Pass 2, LDR:  SMAA -> saturation -> Vignette -> Noise.
+// Pass 3, HD cinema mode only: the film finish (finishFx.ts). A depth of field pass also runs, after AO.
 // SMAA runs after tone mapping on purpose: edge detection on HDR values misses the bright, thin poles
 // against the sun. The renderer itself does no tone mapping (NoToneMapping); ACES happens here, once. ACES, not AgX: AgX greys out
 // the blue and gold of the golden-hour grade; ACES keeps them saturated, with a filmic contrast.
@@ -16,6 +17,7 @@ import {
   HueSaturationEffect, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect,
 } from "postprocessing";
 import { N8AOPostPass } from "n8ao";
+import { FilmFinishEffect } from "./finishFx";
 
 const NOISE_OPACITY = 0.035;
 
@@ -150,6 +152,8 @@ export interface PostFx {
   ao: boolean;
   bloom: boolean;
   godRays: boolean;
+  /** HD's cinema look: the wallpaper's film finish and a live depth of field. */
+  cinema: boolean;
 }
 
 export class Post {
@@ -165,7 +169,12 @@ export class Post {
   /** Still mode: a single exported frame. Every pass at its best quality, whatever it costs. */
   private still = false;
   private focus: StillFocus | null = null;
+  /** Live depth of field, in cinema mode. The scene moves its target and range every frame. */
+  private liveFocus: StillFocus | null = null;
+  private dof: DepthOfFieldEffect | null = null;
   private dofPass: EffectPass | null = null;
+  private finish: FilmFinishEffect | null = null;
+  private finishPass: EffectPass | null = null;
   readonly exposure = new THREE.Uniform(0.38);
   readonly saturation = new HueSaturationEffect({ saturation: 0.28 });
   private glare = new Map<string, THREE.Uniform>([
@@ -205,7 +214,7 @@ export class Post {
   }
 
   setFx(fx: PostFx) {
-    if (fx.ao === this.fx.ao && fx.bloom === this.fx.bloom && fx.godRays === this.fx.godRays) return;
+    if (fx.ao === this.fx.ao && fx.bloom === this.fx.bloom && fx.godRays === this.fx.godRays && fx.cinema === this.fx.cinema) return;
     this.fx = { ...fx };
     this.build();
   }
@@ -218,18 +227,35 @@ export class Post {
     if (still === this.still && focus === this.focus) return;
     this.still = still;
     this.focus = still ? focus : null;
-    this.noise.blendMode.opacity.value = still ? 0 : NOISE_OPACITY;
     this.build();
+  }
+
+  /**
+   * The live focus for cinema mode. The caller keeps the object and moves its target and range each frame;
+   * render() hands range and bokeh to the effect. Null turns the live depth of field off.
+   */
+  setLiveFocus(focus: StillFocus | null) {
+    if (focus === this.liveFocus) return;
+    const had = !!this.liveFocus;
+    this.liveFocus = focus;
+    if (had !== !!focus && this.fx.cinema && !this.still) this.build();
   }
 
   /** Rebuilds every pass after the RenderPass. Cheap: it runs only when a toggle changes. */
   private build() {
-    for (const p of [this.ao, this.dofPass, this.hdrPass, this.ldrPass]) if (p) this.composer.removePass(p);
+    for (const p of [this.ao, this.dofPass, this.hdrPass, this.ldrPass, this.finishPass]) if (p) this.composer.removePass(p);
     this.ao?.dispose();
     this.dofPass?.dispose();
     this.hdrPass?.dispose();
+    this.finishPass?.dispose();
     this.ao = null;
+    this.dof = null;
     this.dofPass = null;
+    this.finish = null;
+    this.finishPass = null;
+    // The still gets its grain from the CPU finish, cinema mode from its own pass: the live noise steps aside.
+    const cinema = this.fx.cinema && !this.still;
+    this.noise.blendMode.opacity.value = this.still || cinema ? 0 : NOISE_OPACITY;
 
     if (this.fx.ao) {
       const ao = new N8AOPostPass(this.scene, this.camera, this.size.w, this.size.h);
@@ -245,15 +271,18 @@ export class Post {
       this.composer.addPass(ao);
     }
 
-    // Still only: a lens with a shallow focus. The flags stay sharp, the sky and the far clouds go soft.
-    // HDR, before exposure: the bright sun spreads into real bokeh instead of a grey smear.
-    if (this.focus) {
+    // A lens with a shallow focus, for the still and for cinema mode: the flags stay sharp, the sky and the
+    // far clouds go soft. HDR, before exposure: the bright sun spreads into real bokeh instead of a grey smear.
+    // Live, at half resolution: the blur hides it, and it halves the cost.
+    const focus = this.still ? this.focus : cinema ? this.liveFocus : null;
+    if (focus) {
       const dof = new DepthOfFieldEffect(this.camera, {
-        focusRange: this.focus.range,
-        bokehScale: this.focus.bokeh,
-        resolutionScale: 1,
+        focusRange: focus.range,
+        bokehScale: focus.bokeh,
+        resolutionScale: this.still ? 1 : 0.5,
       });
-      dof.target = this.focus.target;
+      dof.target = focus.target;
+      this.dof = dof;
       this.dofPass = new EffectPass(this.camera, dof);
       this.composer.addPass(this.dofPass);
     }
@@ -278,6 +307,12 @@ export class Post {
     this.hdrPass = new EffectPass(this.camera, ...effects);
     this.composer.addPass(this.hdrPass);
     this.composer.addPass(this.ldrPass);
+    // Cinema mode: the wallpaper's film finish, last, on the finished image.
+    if (cinema) {
+      this.finish = new FilmFinishEffect();
+      this.finishPass = new EffectPass(this.camera, this.finish);
+      this.composer.addPass(this.finishPass);
+    }
     this.composer.setSize(this.size.w, this.size.h, false);
   }
 
@@ -306,6 +341,12 @@ export class Post {
     this.glare.get("strength")!.value = p.z < 1 ? 1 - THREE.MathUtils.smoothstep(off, 1.1, 2.2) : 0;
     (this.glare.get("sunUv")!.value as THREE.Vector2).set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5);
     this.glare.get("aspect")!.value = this.size.w / this.size.h;
+    this.finish?.setSun(this.glare.get("sunUv")!.value as THREE.Vector2, this.glare.get("strength")!.value as number);
+    const focus = this.still ? this.focus : this.liveFocus;
+    if (this.dof && focus) {
+      this.dof.cocMaterial.focusRange = focus.range;
+      this.dof.bokehScale = focus.bokeh;
+    }
     this.backdrop.render(this.renderer);
     this.composer.render(dt);
   }

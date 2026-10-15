@@ -17,8 +17,8 @@ const FX_KEY = "flagar-hq";
 
 // One switch for visitors: they know "looks better" vs "runs smoother", not AO or bloom.
 // God rays only in high quality: the sun is in view, low, and its rays warm the air around it.
-const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: true, hd: true };
-const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false };
+const FX_HIGH: SalonFx = { ao: true, bloom: true, godRays: true, hd: true, cinema: true };
+const FX_LOW: SalonFx = { ao: false, bloom: false, godRays: false, hd: false, cinema: false };
 const SOUND_KEY = "flagar-sound";
 const HINT_KEY = "flagar-hint-seen";
 
