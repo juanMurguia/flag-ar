@@ -497,7 +497,8 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           className="salon-card" aria-labelledby="salon-card-name" data-state={picked ? "open" : "closing"}
           onAnimationEnd={(e) => { if (!picked && e.target === e.currentTarget) setShown(null); }}
         >
-          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar">
+          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar" aria-keyshortcuts="Escape">
+            <kbd className="key" aria-hidden="true">Esc</kbd>
             <Icon name="close" size={13} />
           </button>
           {/* Keyed by flag: picking another one swaps the content in place while the card stays. */}
@@ -535,7 +536,8 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
 
       {view === "3d" && freePick !== null && !shown && hoist === "closed" && (
         <aside className="salon-card" aria-labelledby="salon-free-name" data-state="open">
-          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar">
+          <button type="button" className="bare-btn salon-card-close" onClick={closeCard} aria-label="Cerrar" aria-keyshortcuts="Escape">
+            <kbd className="key" aria-hidden="true">Esc</kbd>
             <Icon name="close" size={13} />
           </button>
           <div className="salon-card-body" key={`free-${freePick}`}>
@@ -591,7 +593,11 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
               <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
                 <Icon name="prev" size={14} />
               </button>
-              <button type="button" className="salon-nav-label" onClick={() => step(1)}>Recorrer las banderas</button>
+              <button type="button" className="salon-nav-label" onClick={() => step(1)} aria-keyshortcuts="ArrowLeft ArrowRight">
+                Recorrer las banderas
+                <kbd className="key" aria-hidden="true">←</kbd>
+                <kbd className="key" aria-hidden="true">→</kbd>
+              </button>
               <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Bandera siguiente">
                 <Icon name="next" size={14} />
               </button>

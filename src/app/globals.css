@@ -464,7 +464,21 @@ h1, h2 { text-wrap: balance; }
 .salon-card-name .ico { flex: none; color: var(--muted); }
 @media (hover: hover) and (pointer: fine) { .salon-card-name:hover { text-decoration: underline; text-underline-offset: 2px; } }
 /* Above the body: its swap-in animation makes a stacking context that would otherwise paint over the ×. */
-.salon-card-close { position: absolute; z-index: 1; top: 8px; right: 8px; color: var(--ink); }
+.salon-card-close { position: absolute; z-index: 1; top: 8px; right: 8px; color: var(--ink); display: flex; align-items: center; justify-content: center; }
+/* Keyboard hints: small keycaps next to the controls they repeat. Mouse and keyboard screens only. */
+.key {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 4px; font: 500 10px/1 inherit; color: var(--muted); background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+}
+.salon-nav-label .key:first-of-type { margin-left: 6px; }
+.salon-nav-label .key + .key { margin-left: 2px; }
+.salon-card-close .key { margin-right: 6px; }
+@media (hover: hover) and (pointer: fine) {
+  .salon-card-close { width: auto; padding: 0 7px 0 6px; border-radius: 999px; }
+  .salon-card h2, .salon-card-text, .salon-card .startup-trail { padding-right: 56px; }
+}
+@media (pointer: coarse), (hover: none) { .key { display: none; } }
 .salon-card-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
 .salon-card-actions .text-link { display: inline-flex; align-items: center; gap: 4px; }
 /* Flag by flag: arrows inside the card while one is open, a pill at the bottom while none is. */

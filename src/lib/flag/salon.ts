@@ -78,11 +78,11 @@ const HALL_BACKLIGHT = 1.2; // thin cloth: the low sun shows through it
 const HALL_TRANSMIT = 0.16; // a little of the sun through it: more, and a red flag near the sun burns like neon
 
 // ---------- Camera ----------
-// Low and back, on a long lens, looking level: the eye sits just over the cloud tops, so the dark backlit
-// billows fill the foreground (the frame's shadow), the Argentine flag flies high above the field, and the
+// Back, on a long lens, a little above the flags and looking slightly down: the back rows show over the
+// front ones instead of hiding behind them, the Argentine flag flies high above the field, and the
 // telephoto packs the rows behind it.
-const START = new THREE.Vector3(0, 2.9, 26);
-const START_PITCH = 0.04;
+const START = new THREE.Vector3(0, 5.2, 26);
+const START_PITCH = -0.06;
 const START_YAW = 0; // straight down the corridor: the Argentine flag on the center line
 const FOV = 32;
 // Opening shot: the camera cranes down from high and far back to the start view.
@@ -1575,6 +1575,8 @@ export class SalonScene {
       if (e.button === 1) e.preventDefault();
     });
     canvas.addEventListener("pointerdown", (e) => {
+      // The right button opens the context menu, which swallows the pointerup and leaves a drag stuck on.
+      if (e.pointerType === "mouse" && e.button > 1) return;
       canvas.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, lift: e.pointerType === "mouse" && e.button === 1 });
       this.moved = false;
@@ -1584,6 +1586,8 @@ export class SalonScene {
       if (e.pointerType === "mouse") this.hoverAt = { clientX: e.clientX, clientY: e.clientY }; // picked in the loop, once per frame
       const p = this.pointers.get(e.pointerId);
       if (!p) return;
+      // A mouse with no button down is no drag, whatever release went missing.
+      if (e.pointerType === "mouse" && e.buttons === 0) return end(e);
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
       p.x = e.clientX;
       p.y = e.clientY;
