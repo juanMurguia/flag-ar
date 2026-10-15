@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browserClient } from "@/lib/client/supabase";
+import { ACCEPT, prepareUpload } from "@/lib/flag/logoUpload";
 import { categoryLabel } from "@/lib/startups/model";
 import EditQueue from "./EditQueue";
 
@@ -56,6 +57,7 @@ export default function AdminPanel() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const logoInput = useRef<HTMLInputElement>(null);
 
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
@@ -106,6 +108,28 @@ export default function AdminPanel() {
     setNotice(body.message || (res.ok ? "Done." : `Error ${res.status}`));
     setBusy(false);
     if (res.ok) await load();
+  }
+
+  // Same browser pipeline as the public form (background removal, trim), then the admin route stores it.
+  async function replaceLogo(file: File | undefined) {
+    if (!selected || !file || busy) return;
+    setBusy(true);
+    setNotice("Processing logo…");
+    try {
+      const { png } = await prepareUpload(file, true, setNotice);
+      const form = new FormData();
+      form.set("id", selected.id);
+      form.set("logo", png, "logo.png");
+      const res = await fetch("/api/admin/logo", { method: "POST", body: form });
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      setNotice(body.message || (res.ok ? "Done." : `Error ${res.status}`));
+      if (res.ok) await load();
+    } catch {
+      setNotice("Could not read that image.");
+    } finally {
+      setBusy(false);
+      if (logoInput.current) logoInput.current.value = "";
+    }
   }
 
   async function toggleUploads() {
@@ -236,6 +260,15 @@ export default function AdminPanel() {
                 <button className="btn ghost" onClick={() => act(selected.featured ? "unfeature" : "feature")} disabled={busy}>
                   {selected.featured ? "Unfeature" : "Feature"}
                 </button>
+              )}
+              {selected.status !== "rejected" && (
+                <>
+                  <button className="btn ghost" onClick={() => logoInput.current?.click()} disabled={busy}>Replace logo</button>
+                  <input
+                    ref={logoInput} type="file" accept={ACCEPT} hidden
+                    onChange={(e) => replaceLogo(e.target.files?.[0])}
+                  />
+                </>
               )}
               {selected.report_count > 0 && (
                 <button className="btn ghost" onClick={() => act("clear-reports")} disabled={busy}>Clear reports</button>
