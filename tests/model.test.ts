@@ -50,12 +50,16 @@ describe("normalizeStartupLink", () => {
 
 describe("default flag color", () => {
   const px = (rgb: number[], n = 100) => Array.from({ length: n }, () => [...rgb, 255]).flat();
-  it("inverts the dominant color", () => {
+  it("puts dark logos on white", () => {
     expect(defaultBackground(dominantColor(px([0, 0, 0])))).toBe("#ffffff");
-    expect(defaultBackground(dominantColor(px([255, 255, 0])))).toBe("#0000ff");
+    expect(defaultBackground([26, 31, 58])).toBe("#ffffff"); // navy wordmark
   });
-  it("falls back to white when the inverse has no contrast", () => {
-    expect(defaultBackground([128, 128, 128])).toBe("#ffffff");
+  it("puts light logos on black", () => {
+    expect(defaultBackground(dominantColor(px([255, 255, 0])))).toBe("#000000");
+    expect(defaultBackground([255, 255, 255])).toBe("#000000");
+  });
+  it("picks the neutral with more contrast for mid tones, white when there is no logo", () => {
+    expect(defaultBackground([128, 128, 128])).toBe("#000000");
     expect(defaultBackground(null)).toBe("#ffffff");
   });
   it("measures WCAG contrast", () => {

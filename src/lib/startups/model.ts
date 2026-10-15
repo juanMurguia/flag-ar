@@ -202,11 +202,10 @@ export function dominantColor(rgba: ArrayLike<number>): RGB | null {
 }
 
 /**
- * Default flag color: the logo's dominant color, inverted. When the inverse does not stand out
- * from the logo (mid grays invert to mid grays), white.
+ * Default flag color: white or black, whichever stands out more from the logo's dominant color.
+ * Inverting the color landed far from the brand (navy turned pale yellow); a neutral never does.
  */
 export function defaultBackground(dominant: RGB | null): string {
   if (!dominant) return "#ffffff";
-  const inv: RGB = [255 - dominant[0], 255 - dominant[1], 255 - dominant[2]];
-  return contrast(inv, dominant) >= 3 ? rgbToHex(inv) : "#ffffff";
+  return contrast(dominant, [255, 255, 255]) >= contrast(dominant, [0, 0, 0]) ? "#ffffff" : "#000000";
 }
