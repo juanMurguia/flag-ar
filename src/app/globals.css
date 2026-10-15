@@ -519,6 +519,8 @@ h1, h2 { text-wrap: balance; }
   padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; color: #3d3d3d;
   background: rgba(0, 0, 0, 0.06);
 }
+/* Row view: rank and likes on one line, the heart beside the count. */
+.tip-likes { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 @keyframes tip-in { from { opacity: 0; transform: translateY(2px) scale(0.94); } }
 @media (pointer: coarse) { .salon-tip { display: none; } }
 /* First visit: one line above the tour pill. */

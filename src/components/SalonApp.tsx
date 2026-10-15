@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import HoistPanel from "./HoistPanel";
-import type { SalonFx, SalonScene } from "@/lib/flag/salon";
+import type { Layout, SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
@@ -71,6 +71,8 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
     [fetched, likesOf],
   );
   const [view, setView] = useState<"3d" | "grid" | null>(null);
+  // 3D layout: the hall, or every flag in one row sized by its likes.
+  const [layout, setLayout] = useState<Layout>("hall");
   const [query, setQuery] = useState("");
   // High quality: null until the scene picks its device default. A saved choice wins over the default.
   const [high, setHigh] = useState<boolean | null>(null);
@@ -177,6 +179,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
       return;
     }
     hoistSlot.current = slot;
+    setLayout("hall"); // the hoist happens in the hall: claimSlot leaves the row view
     setPicked(null);
     setFreePick(null);
     if (location.pathname === "/izar") s.claimSlot(slot); // already open: another empty pole takes the flag
@@ -435,6 +438,15 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
     } catch {}
   }
 
+  function toggleLayout() {
+    const next = layout === "hall" ? "row" : "hall";
+    setLayout(next);
+    setPicked(null);
+    setFreePick(null);
+    navRef.current = null;
+    scene.current?.setLayout(next);
+  }
+
   function toggleSound() {
     const next = !soundRef.current;
     soundRef.current = next;
@@ -507,6 +519,12 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
       {high !== null && (
         <div className="salon-corner">
+          <button
+            type="button" className="bar-btn hd-btn" aria-pressed={layout === "row"} onClick={toggleLayout}
+            aria-label="Ver en fila" title={layout === "row" ? "Volver al salón" : "Todas en fila, de menos a más likes"}
+          >
+            Fila
+          </button>
           <button
             type="button" className="bar-btn" data-sound aria-pressed={sound} onClick={toggleSound}
             aria-label="Sonido" title={sound ? "Silenciar" : "Activar sonido"}
@@ -631,6 +649,13 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
                 </span>
                 <span className="tip-name">{s.name}</span>
                 {cat && <span className="tip-chip">{cat}</span>}
+                {/* The row compares by likes: its label says the rank and the count. */}
+                {layout === "row" && (
+                  <span className="tip-chip tip-likes">
+                    #{hovered.index + 1} · {likesOf(s).toLocaleString("es-AR")} <Icon name="heart" size={10} />
+                    <span className="sr-only">likes</span>
+                  </span>
+                )}
               </div>
             );
           })()}

@@ -107,6 +107,21 @@ const EASE_ORBIT = 7; // 1/s
 const HALL_INNER = 4.5; // m from the axis to the center of the inner cloths
 const HALL_DX = 4.5; // m between neighbors in a row: a cloth is 3.1 wide, so a gap of about 1.4 m
 const HOVER_GLOW = 0.1;
+
+// Row view: every flag in one line, fewest likes on the left, most on the right, each one sized by its likes,
+// like a "size comparison" video. The camera slides along the row and pulls back as the flags grow.
+const ROW_Z = FIRST_Z;
+// Flag scale at zero likes and at the most likes. Not smaller: about 3 m of crag shows above the clouds
+// whatever its scale, and under a smaller flag it reads as a wall.
+const ROW_MIN = 0.8, ROW_MAX = 2.4;
+const ROW_GAP = 1.6; // m of sky between two cloths, times the bigger one's scale
+// Flags scale around this height, so every crag top stays just over the clouds whatever the size.
+const ROW_PIVOT = CLOUD_TOP;
+const ROW_CRAG_DEPTH = 0.3; // crag height below its top in the row view, against the hall's
+const ROW_PAN = 6; // m/s per unit of scale: the opening slide from the smallest flag to the biggest
+const ROW_DIST_MIN = 28; // m from the row: the hall start view's distance to its front row, where the clouds hide the crags' feet
+
+export type Layout = "hall" | "row";
 const EASE_HOVER = 7; // 1/s
 
 // Sky and cloud sea resolution, per axis, against the drawing buffer. Both are soft: half resolution measured
@@ -131,6 +146,8 @@ function halton(i: number, base: number) {
   return r;
 }
 
+const SUN_FOCUS = new THREE.Vector3(0, 2, (FIRST_Z + ARG_Z) / 2); // center of the hall's shadow box
+const SUN_P = new THREE.Vector3();
 const FOCUS_DIR = new THREE.Vector3();
 const FOCUS_P = new THREE.Vector3();
 const FOCUS_NDC = new THREE.Vector3();
@@ -175,6 +192,8 @@ interface Slot {
   x: number;
   z: number;
   side: 1 | -1;
+  /** Size of the whole stand (crag, pole and cloth). 1 in the hall. */
+  s?: number;
 }
 
 /** Row r's depth. Rows from the third on skip one step, so the Argentine flag stands in an open gap. */
@@ -197,6 +216,29 @@ export function hallSlots(n: number, perSide: number): Slot[] {
     const shift = row % 2 === 1 ? HALL_DX / 2 : 0;
     return { x: side * (HALL_INNER + shift + col * HALL_DX) - FLAG_W / 2, z: rowZ(row), side };
   });
+}
+
+/**
+ * The row view. `likes` is in seat order (index 0 has the most). Fewest likes stand on the left, most on the
+ * right. Scale follows log(likes), so one big flag does not flatten the rest; it never shrinks to the right,
+ * even when a visitor's own like reordered the seats before the counts caught up. The row centers on x = 0.
+ */
+export function rowSlots(likes: number[]): Slot[] {
+  const n = likes.length;
+  const top = Math.log1p(Math.max(0, ...likes));
+  const out: Slot[] = new Array(n);
+  let x = 0, prev = 0, last = 0;
+  for (let j = 0; j < n; j++) {
+    const i = n - 1 - j;
+    const raw = top > 0 ? ROW_MIN + ((ROW_MAX - ROW_MIN) * Math.log1p(Math.max(0, likes[i]))) / top : 1;
+    const s = Math.max(raw, last);
+    if (j > 0) x += prev * FLAG_W + ROW_GAP * s;
+    out[i] = { x, z: ROW_Z, side: 1, s };
+    prev = last = s;
+  }
+  const mid = n ? (x + prev * FLAG_W) / 2 : 0;
+  for (const p of out) p.x -= mid;
+  return out;
 }
 
 /** Wave phase per flag: golden-angle steps, so neighbors never move in step. */
@@ -261,6 +303,10 @@ export class SalonScene {
   private list: PublicStartup[] = [];
   private poled = 0; // startups on a hall pole: list[i] stands in slot i for i < poled. The rest show only in the showcase
   private slots: Slot[] = [];
+  private hallLayout: Slot[] = []; // the hall's seats, kept while the row view shows
+  private layout: Layout = "hall";
+  private rowCenters: { x: number; s: number }[] = []; // cloth centers left to right, for the row camera
+  private rowPan = false; // the opening slide along the row runs until any input
   private cols = 10;
   private time = 0;
   private raf = 0;
@@ -375,9 +421,8 @@ export class SalonScene {
     // The low sun casts long shadows toward the viewer: the poles across their crags, the cloths on the rock.
     // One map over the hall and the hero only; the far crags take no part.
     const sun = new THREE.DirectionalLight(0xffc27a, 2.1);
-    const focus = new THREE.Vector3(0, 2, (FIRST_Z + ARG_Z) / 2);
-    sun.position.copy(this.sunDir).multiplyScalar(90).add(focus);
-    sun.target.position.copy(focus);
+    sun.position.copy(this.sunDir).multiplyScalar(90).add(SUN_FOCUS);
+    sun.target.position.copy(SUN_FOCUS);
     sun.castShadow = t.shadows;
     sun.shadow.mapSize.set(2048, 2048);
     Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 16, bottom: -12, near: 40, far: 150 });
@@ -427,15 +472,18 @@ export class SalonScene {
     this.cols = 2;
     // Phones are narrow: a third cloth each side would start out of frame.
     const narrow = window.matchMedia?.("(max-width: 767px)").matches;
-    this.slots = hallSlots(count, narrow ? 2 : 3);
+    this.hallLayout = hallSlots(count, narrow ? 2 : 3);
     this.buildHall();
+    this.setSlots();
     if (prevIds) {
       for (let i = 0; i < this.poled; i++) if (!prevIds.has(list[i].id)) this.rising.set(i, this.time);
     }
     for (let i = 0; i < count; i++) {
       this.paintFlag(i);
+      this.placeStand(i);
       this.placeFlag(i);
     }
+    if (this.layout === "row") this.clampPos();
     // In the showcase, the new hall stays hidden. Its startup left the list: back to the hall.
     if (showingId !== undefined && this.showing < 0) {
       this.showing = 0; // leaveShowcase only runs from an open showcase
@@ -464,6 +512,7 @@ export class SalonScene {
    * above the row in front. A second call moves the flag to the new slot and keeps its paint.
    */
   claimSlot(slot = this.poled) {
+    if (this.layout === "row") this.applyLayout("hall"); // the hoist happens in the hall
     if (slot < this.poled || !this.slots[slot]) slot = this.poled;
     const p = this.slots[slot];
     if (!p) return;
@@ -617,6 +666,7 @@ export class SalonScene {
   /** The hall's empty poles, in seat order: the tour visits them after the startups. */
   emptySlots(): number[] {
     const out: number[] = [];
+    if (this.layout === "row") return out; // the row shows only startups
     for (let i = this.poled; i < this.slots.length; i++) out.push(i);
     return out;
   }
@@ -638,6 +688,11 @@ export class SalonScene {
   private flyToFlag(i: number, select: number | null = i) {
     const p = this.slots[i];
     if (!p) return;
+    if (this.layout === "row") {
+      const v = this.rowView(p.x + ((p.s ?? 1) * FLAG_W) / 2);
+      this.flyTo(v.pos, v.look, select);
+      return;
+    }
     // Frame the flag at about half the screen width, whatever the lens and the screen shape: on the long lens
     // a fixed distance either crops it (portrait) or leaves it small (wide screens). From that far back the
     // row in front can stand in the way, so the eye rises a little and leans toward the corridor: the line of
@@ -698,7 +753,12 @@ export class SalonScene {
   /** Back to the start view, facing the sun and the Argentine flag. From the showcase: the hall fades back first. */
   home() {
     this.setHighlight([]);
-    const go = () => this.flyTo(START.clone(), this.lookFrom(START, START_YAW, START_PITCH), null);
+    const go = () => {
+      if (this.layout === "row") {
+        const v = this.rowView(this.rowEnd());
+        this.flyTo(v.pos, v.look, null);
+      } else this.flyTo(START.clone(), this.lookFrom(START, START_YAW, START_PITCH), null);
+    };
     if (this.showing >= 0) {
       this.cut(() => {
         this.leaveShowcase();
@@ -734,12 +794,128 @@ export class SalonScene {
       o.goalZoom = THREE.MathUtils.clamp(o.goalZoom * Math.exp(-meters * 0.04), ORBIT_ZOOM_MIN, ORBIT_ZOOM_MAX);
       return;
     }
+    if (this.layout === "row") {
+      this.slide(-meters * this.scaleAt(this.goalPos.x));
+      return;
+    }
     this.flight = null;
     this.goalPos.z -= meters;
     this.clampPos();
   }
 
+  // ---------- Row view ----------
+
+  /** Switches between the hall and the row view. A quick fade hides the cut. */
+  setLayout(mode: Layout) {
+    if (mode === this.layout) return;
+    this.cut(() => this.applyLayout(mode));
+  }
+
+  private applyLayout(mode: Layout) {
+    this.leaveShowcase();
+    if (mode === "row" && this.claim) this.dropClaim();
+    this.layout = mode;
+    this.setSlots();
+    for (let i = 0; i < this.flags.length; i++) {
+      this.placeStand(i);
+      this.placeFlag(i);
+    }
+    this.refreshFlags();
+    this.setHighlight([]);
+    this.flight = null;
+    if (this.hovered >= 0) {
+      this.hovered = -1;
+      this.events.onHover?.(null);
+    }
+    if (mode === "row") {
+      // Like the videos: start on the smallest flag and slide to the biggest. Reduced motion starts at the end.
+      const c = this.rowCenters;
+      this.goalPos.x = this.reducedMotion() || !c.length ? this.rowEnd() : c[0].x;
+      this.clampPos();
+      this.pos.copy(this.goalPos);
+      this.aimRow();
+      this.rowPan = !this.reducedMotion() && c.length > 1;
+    } else {
+      this.rowPan = false;
+      this.aimSun(SUN_FOCUS);
+      this.pos.copy(START);
+      this.goalPos.copy(START);
+      this.yaw = this.goalYaw = START_YAW;
+      this.pitch = this.goalPitch = START_PITCH;
+    }
+  }
+
+  /** Slots for the current layout, and the row camera's cloth centers. */
+  private setSlots() {
+    if (this.layout === "row") {
+      this.slots = rowSlots(this.list.slice(0, this.poled).map((s) => s.likes));
+      this.rowCenters = this.slots.map((p) => ({ x: p.x + ((p.s ?? 1) * FLAG_W) / 2, s: p.s ?? 1 })).sort((a, b) => a.x - b.x);
+    } else {
+      this.slots = this.hallLayout;
+      this.rowCenters = [];
+    }
+  }
+
+  /** The biggest flag's center: where the row view rests. */
+  private rowEnd() {
+    return this.rowCenters.at(-1)?.x ?? 0;
+  }
+
+  /** Flag scale at x along the row, eased between neighbors, so the camera pulls back smoothly. */
+  private scaleAt(x: number) {
+    const c = this.rowCenters;
+    if (!c.length) return 1;
+    if (x <= c[0].x) return c[0].s;
+    for (let k = 1; k < c.length; k++) {
+      if (x <= c[k].x) return c[k - 1].s + (c[k].s - c[k - 1].s) * ((x - c[k - 1].x) / (c[k].x - c[k - 1].x));
+    }
+    return c[c.length - 1].s;
+  }
+
+  /** Row camera at x: square in front of the row, back far enough for the local flags to fit the height. */
+  private rowView(x: number) {
+    const s = this.scaleAt(x);
+    const cy = ROW_PIVOT + s * (POLE_H - 0.2 - FLAG_H / 2 - ROW_PIVOT);
+    // About three flag heights of view: four or five flags across, so neighbors read side by side. Never
+    // closer than ROW_DIST_MIN: small flags then look small, and the crags' feet stay hidden in the clouds.
+    const tall = s * (POLE_H - ROW_PIVOT) * 3 + 2;
+    const dist = Math.max(ROW_DIST_MIN, tall / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
+    return {
+      pos: new THREE.Vector3(x, Math.max(EYE_MIN, cy + dist * 0.12), ROW_Z + dist),
+      look: new THREE.Vector3(x, cy, ROW_Z),
+    };
+  }
+
+  /** Looks at the row from where the camera is. */
+  private aimRow() {
+    const d = this.rowView(this.pos.x).look.sub(this.pos);
+    this.yaw = this.goalYaw = 0;
+    this.pitch = this.goalPitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
+  }
+
+  /** Moves the row camera `meters` to the right. Any input stops the opening slide. */
+  private slide(meters: number) {
+    this.flight = null;
+    this.rowPan = false;
+    this.goalPos.x += meters;
+    this.clampPos();
+  }
+
+  /** A drag of `px` screen pixels: the row follows the finger. */
+  private pan(px: number) {
+    const d = this.goalPos.z - ROW_Z;
+    this.slide((px * 2 * d * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / this.size.h);
+  }
+
+  /** Points the sun's shadow box (40 m wide) at `focus`. The row view moves it with the camera. */
+  private aimSun(focus: THREE.Vector3) {
+    this.sunLight.position.copy(this.sunDir).multiplyScalar(90).add(focus);
+    this.sunLight.target.position.copy(focus);
+    this.sunLight.target.updateMatrixWorld();
+  }
+
   private turn(dYaw: number, dPitch: number) {
+    if (this.layout === "row" && this.showing < 0) return; // the row view slides instead (pan, slide)
     this.flight = null;
     if (this.showing >= 0) {
       // The showcase: drag circles the pair. Drag right, the pair turns right (the camera goes left).
@@ -1168,11 +1344,12 @@ export class SalonScene {
    * once made: when the list shrinks, the extra ones only hide (refreshFlags).
    */
   private buildHall() {
-    for (let i = this.flags.length; i < this.slots.length; i++) {
-      const p = this.slots[i];
+    for (let i = this.flags.length; i < this.hallLayout.length; i++) {
+      const p = this.hallLayout[i];
       // Crags vary a little in size and height, as real rock does.
       const k = 0.5 + 0.5 * Math.sin(phaseOf(i) * 3.1);
       const stand = this.standPole(p.x, p.z, POLE_H, HALL_POLE_R, HALL_ROCK.radius * (0.85 + 0.3 * k), HALL_ROCK.top - 0.25 * k, 11 + i, FLAG_H - 0.05);
+      stand.userData.base = { x: p.x, z: p.z };
       this.hall.add(stand);
       this.stands.push(stand);
       const f = this.makeFlag(i);
@@ -1199,7 +1376,25 @@ export class SalonScene {
 
   private placeFlag(i: number) {
     const f = this.flags[i], p = this.slots[i];
-    if (f && p) f.mesh.position.set(p.x + HALL_POLE_R + 0.02, POLE_H - 0.2 - this.riseDrop(i), p.z);
+    if (!f || !p) return;
+    const s = p.s ?? 1;
+    f.mesh.scale.setScalar(s);
+    f.mesh.position.set(p.x + s * (HALL_POLE_R + 0.02), ROW_PIVOT + s * (POLE_H - 0.2 - ROW_PIVOT) - this.riseDrop(i), p.z);
+  }
+
+  /**
+   * Moves stand i (built at its hall seat) to its slot, scaled around ROW_PIVOT. In the row view the crag is
+   * also squashed below its top: the long row crosses cloud troughs, and a full crag shows there as a wall.
+   */
+  private placeStand(i: number) {
+    const st = this.stands[i], p = this.slots[i];
+    if (!st || !p) return;
+    const s = p.s ?? 1, b = st.userData.base as { x: number; z: number };
+    st.scale.setScalar(s);
+    st.position.set(p.x - s * b.x, ROW_PIVOT - s * ROW_PIVOT, p.z - s * b.z);
+    const island = st.children[0], k = this.layout === "row" ? ROW_CRAG_DEPTH : 1;
+    island.scale.y = k;
+    island.position.y = ROW_PIVOT * (1 - k);
   }
 
   /** The visitor's own flag covers the claimed slot's cloth. */
@@ -1435,8 +1630,13 @@ export class SalonScene {
     if (this.keys.has("ArrowUp") || this.keys.has("w")) this.walk(speed);
     if (this.keys.has("ArrowDown") || this.keys.has("s")) this.walk(-speed);
     // Left and right arrows step from flag to flag (SalonApp); A and D turn the view.
-    if (this.keys.has("a")) this.turn(1.2 * dt, 0);
-    if (this.keys.has("d")) this.turn(-1.2 * dt, 0);
+    if (this.layout === "row" && this.showing < 0) {
+      if (this.keys.has("a")) this.slide(-speed * this.scaleAt(this.goalPos.x));
+      if (this.keys.has("d")) this.slide(speed * this.scaleAt(this.goalPos.x));
+    } else {
+      if (this.keys.has("a")) this.turn(1.2 * dt, 0);
+      if (this.keys.has("d")) this.turn(-1.2 * dt, 0);
+    }
 
     if (this.flight) {
       const f = this.flight;
@@ -1464,6 +1664,14 @@ export class SalonScene {
         o.zoom += (o.goalZoom - o.zoom) * k;
         this.placeOrbit();
       }
+    } else if (!this.flight && this.layout === "row") {
+      if (this.rowPan) {
+        this.goalPos.x += ROW_PAN * this.scaleAt(this.goalPos.x) * dt;
+        if (this.goalPos.x >= this.rowEnd()) this.rowPan = false;
+        this.clampPos();
+      }
+      this.pos.lerp(this.goalPos, 1 - Math.exp(-EASE_MOVE * dt));
+      this.aimRow();
     } else if (!this.flight) {
       // Frame-rate independent ease toward the goals.
       this.pos.lerp(this.goalPos, 1 - Math.exp(-EASE_MOVE * dt));
@@ -1473,6 +1681,7 @@ export class SalonScene {
       this.pitch += (this.goalPitch - this.pitch) * look;
     }
 
+    if (this.layout === "row" && this.showing < 0) this.aimSun(SUN_P.set(this.pos.x, 2, ROW_Z));
     this.updateInset(dt);
     this.updateClaim(dt);
     this.camera.position.copy(this.pos); // the camera moves only with input, flights, and the intro
@@ -1519,6 +1728,15 @@ export class SalonScene {
   };
 
   private clampPos() {
+    if (this.layout === "row") {
+      const c = this.rowCenters, g = this.goalPos;
+      if (!c.length) return;
+      g.x = THREE.MathUtils.clamp(g.x, c[0].x, c[c.length - 1].x);
+      const v = this.rowView(g.x);
+      g.y = v.pos.y;
+      g.z = v.pos.z;
+      return;
+    }
     const rows = Math.ceil(this.slots.length / (this.cols * 2));
     const end = rowZ(Math.max(rows, 1)); // one step behind the last row
     const w = CORRIDOR + this.cols * DX;
@@ -1600,12 +1818,17 @@ export class SalonScene {
       if (p.lift) {
         // Middle drag: up raises the eye, down lowers it. The showcase orbit has its own height.
         canvas.style.cursor = "ns-resize";
-        if (this.showing >= 0) return;
+        if (this.showing >= 0 || this.layout === "row") return;
         this.goalPos.y -= dy * LIFT_PER_PX;
         this.clampPos();
         return;
       }
       canvas.style.cursor = "grabbing";
+      // The row view: drag slides along the row.
+      if (this.layout === "row" && this.showing < 0) {
+        this.pan(-dx);
+        return;
+      }
       // Drag to look around.
       this.turn(dx * 0.0026, dy * 0.0022);
     });
@@ -1637,7 +1860,9 @@ export class SalonScene {
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
       // Cap each event: trackpad flings send huge deltas. The ease turns the step into a glide.
-      this.walk(-THREE.MathUtils.clamp(e.deltaY, -120, 120) * 0.025);
+      // The row view also takes sideways scrolls (trackpads, shift + wheel).
+      const d = this.layout === "row" && Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      this.walk(-THREE.MathUtils.clamp(d, -120, 120) * 0.025);
     }, { passive: false });
     canvas.addEventListener("keydown", (e) => {
       if (["ArrowUp", "ArrowDown", "w", "a", "s", "d"].includes(e.key)) {
