@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cleanCategory, cleanName, contrast, defaultBackground, dominantColor, isValidSlug,
+  bySeat, cleanCategory, cleanName, contrast, defaultBackground, dominantColor, isValidSlug,
   normalizeStartupLink, slugify,
 } from "@/lib/startups/model";
 import { hallSlots, phaseOf } from "@/lib/flag/salon";
@@ -82,5 +82,17 @@ describe("salon layout", () => {
   });
   it("gives neighbors different wave phases", () => {
     expect(Math.abs(phaseOf(1) - phaseOf(0))).toBeGreaterThan(0.5);
+  });
+});
+
+describe("bySeat", () => {
+  it("puts the most liked flag first, the older one first on a tie", () => {
+    const list = [
+      { id: "a", likes: 2, order: 1 },
+      { id: "b", likes: 9, order: 3 },
+      { id: "c", likes: 2, order: 0 },
+      { id: "d", likes: 0, order: 2 },
+    ];
+    expect(list.sort(bySeat).map((s) => s.id)).toEqual(["b", "c", "a", "d"]);
   });
 });

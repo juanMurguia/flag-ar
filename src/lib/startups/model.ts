@@ -16,6 +16,11 @@ export function seatsLine(taken: number): string {
   return `${left === 1 ? "Queda 1" : `Quedan ${left}`} de ${SALON_SEATS} lugares · Cada bandera se revisa`;
 }
 
+/** Hall of Fame seat order: most likes first; on a tie, the older flag (lower order number) first. */
+export function bySeat(a: Pick<PublicStartup, "likes" | "order">, b: Pick<PublicStartup, "likes" | "order">): number {
+  return b.likes - a.likes || a.order - b.order;
+}
+
 /** What a public page may show. No IP hash, no moderation fields. */
 export interface PublicStartup {
   id: string;
@@ -32,6 +37,8 @@ export interface PublicStartup {
   order: number;
   status: StartupStatus;
   featured: boolean;
+  /** Visitor likes. More likes, a seat closer to the Argentine flag. */
+  likes: number;
   createdAt: string;
   approvedAt: string | null;
 }

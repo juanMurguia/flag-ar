@@ -498,6 +498,51 @@ h1, h2 { text-wrap: balance; }
   text-shadow: 0 0 8px rgba(255, 244, 228, 0.9); pointer-events: none;
   animation: fade 600ms var(--ease-out) 500ms both;
 }
+/* Ranking: a small glass list in the top-left corner. Position, name, likes. Three rows, "Ver más" for ten. */
+.ranking {
+  position: absolute; z-index: 2; top: max(12px, env(safe-area-inset-top)); left: 12px;
+  width: 196px; padding: 8px 6px 6px; border-radius: var(--radius-lg); color: var(--ink); --muted: #3d3d3d;
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sm);
+  animation: drop-in 420ms var(--ease-out) 300ms both;
+}
+.salon.grid-mode .ranking { position: static; margin: 12px auto 0; background: #fff; box-shadow: 0 0 0 1px #d0d0d0; }
+.ranking-title {
+  margin: 0 0 4px; padding: 0 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted);
+}
+.ranking-list { margin: 0; padding: 0; list-style: none; }
+.ranking-list li { animation: swap-in 200ms var(--ease-out) both; }
+.ranking-list button {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 8px;
+  background: none; color: inherit; font: inherit; font-size: 12px; line-height: 1.2; text-align: left; cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .ranking-list button:hover { background: rgba(0, 0, 0, 0.06); } }
+.ranking-pos { flex: none; width: 14px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.ranking-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+.ranking-likes {
+  flex: none; display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.ranking-more {
+  display: block; margin: 2px 0 0; padding: 4px 6px; border: 0; background: none; color: var(--muted); font: inherit;
+  font-size: 11px; font-weight: 500; cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .ranking-more:hover { color: var(--ink); } }
+/* Phones: under the bar, so it never covers the search. */
+@media (max-width: 640px) {
+  .ranking { top: calc(max(12px, env(safe-area-inset-top)) + 64px); width: 172px; }
+}
+/* Like: a pill in the flag card. Filled heart once this device liked the flag. */
+.like-btn {
+  display: inline-flex; align-items: center; gap: 5px; width: fit-content; height: 26px; margin-top: 6px; padding: 0 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 999px; background: rgba(255, 255, 255, 0.6);
+  color: var(--ink); font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.like-btn[aria-pressed="true"] { color: #c8322b; border-color: rgba(200, 50, 43, 0.35); background: rgba(255, 240, 238, 0.85); }
+.like-btn[aria-pressed="true"] .ico { fill: currentColor; animation: like-pop 320ms var(--ease-out); }
+.like-btn:active { transform: scale(0.96); }
+@keyframes like-pop { 40% { transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .like-btn[aria-pressed="true"] .ico { animation: none; } }
 .salon-hint {
   position: absolute; z-index: 2; left: 50%; translate: -50% 0; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 48px);
   margin: 0; padding: 6px 12px; border-radius: 999px; font-size: 12px; color: #fff; white-space: nowrap;

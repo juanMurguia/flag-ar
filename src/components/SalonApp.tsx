@@ -5,11 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import HoistPanel from "./HoistPanel";
 import type { SalonFx, SalonScene } from "@/lib/flag/salon";
-import { CATEGORIES, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
+import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
 import { xIntent } from "./Share";
 import Icon from "./Icon";
+import { useLikes } from "./useLikes";
 
 const POLL_MS = 30_000;
 const FX_KEY = "flagar-hq";
@@ -48,6 +49,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   const holder = useRef<HTMLDivElement>(null);
   const scene = useRef<SalonScene | null>(null);
   const [all, setAll] = useState(initial);
+  const { liked, likesOf, toggle: toggleLike } = useLikes();
   const [view, setView] = useState<"3d" | "grid" | null>(null);
   const [query, setQuery] = useState("");
   // High quality: null until the scene picks its device default. A saved choice wins over the default.
@@ -220,7 +222,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         return {
           id: `demo-${i}`, slug: `demo-${i}`, name: `${l.name ?? l.domain} ${i + 1}`, city: null, category: CATEGORIES[i % (CATEGORIES.length - 1)].key,
           link: `https://${l.domain}`, domain: `${i}.${l.domain}`, logoUrl: `/sample/${l.image}`, bgColor: colors[i % colors.length],
-          order: i + 1, status: "approved", featured: i % 97 === 3, createdAt: d, approvedAt: d,
+          order: i + 1, status: "approved", featured: i % 97 === 3, likes: Math.max(0, 40 - i * 3), createdAt: d, approvedAt: d,
         } satisfies PublicStartup;
       }));
     });
@@ -345,6 +347,14 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     else s.setHighlight([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchKey, view]);
+  // Likes reorder the seats: the glow moves with its flags, the camera stays.
+  useEffect(() => {
+    const s = scene.current;
+    if (view !== "3d" || !s || !q) return;
+    const ids = new Set(matches.map((m) => m.id));
+    s.setHighlight(all.flatMap((x, i) => (ids.has(x.id) ? [i] : [])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey]);
 
   function toggleQuality() {
     if (highRef.current === null) return;
@@ -406,6 +416,7 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         </label>
       </header>
       {view === "3d" && <p className="salon-seats">{seatsLine(all.length)}</p>}
+      {view !== null && !q && hoist === "closed" && <Ranking list={all} likesOf={likesOf} onPick={go} />}
 
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}
       {high !== null && (
@@ -452,6 +463,14 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
           <div className="salon-card-body" key={shown.id}>
             <h2 id="salon-card-name">{shown.name}</h2>
             <a className="salon-card-link" href={shown.link} target="_blank" rel="noopener noreferrer">{shown.domain}</a>
+            <button
+              type="button" className="like-btn" aria-pressed={liked.has(shown.id)} onClick={() => toggleLike(shown)}
+              aria-label={liked.has(shown.id) ? `Sacar like a ${shown.name}` : `Darle like a ${shown.name}`}
+              title="Más likes, más cerca de la bandera argentina"
+            >
+              <Icon name="heart" size={13} />
+              <span>{likesOf(shown).toLocaleString("es-AR")}</span>
+            </button>
             {all.length > 1 && (
               <div className="salon-card-nav">
                 <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Bandera anterior">
@@ -540,6 +559,50 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
         </section>
       )}
     </main>
+  );
+}
+
+const RANK_SIZE = 10;
+const RANK_FOLDED = 3;
+
+/** Top 10 by likes, small, in a corner. The top 3 always show; "Ver más" unfolds the rest. */
+function Ranking({ list, likesOf, onPick }: {
+  list: PublicStartup[]; likesOf: (s: PublicStartup) => number; onPick: (s: PublicStartup) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Same rule as the seats (bySeat), with the visitor's own likes already counted.
+  const top = useMemo(
+    () => list.map((s) => ({ s, likes: likesOf(s) }))
+      .sort((a, b) => bySeat({ likes: a.likes, order: a.s.order }, { likes: b.likes, order: b.s.order }))
+      .slice(0, RANK_SIZE),
+    [list, likesOf],
+  );
+  if (!top.length) return null;
+  const rows = open ? top : top.slice(0, RANK_FOLDED);
+  return (
+    <section className="ranking" aria-labelledby="ranking-title">
+      <h2 id="ranking-title" className="ranking-title">Ranking</h2>
+      <ol className="ranking-list">
+        {rows.map(({ s, likes }, i) => (
+          <li key={s.id}>
+            <button type="button" onClick={() => onPick(s)} title={`Ir a ${s.name}`}>
+              <span className="ranking-pos">{i + 1}</span>
+              <span className="ranking-name">{s.name}</span>
+              <span className="ranking-likes">
+                {likes.toLocaleString("es-AR")}
+                <Icon name="heart" size={10} />
+                <span className="sr-only">likes</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+      {top.length > RANK_FOLDED && (
+        <button type="button" className="ranking-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Ver menos" : "Ver más"}
+        </button>
+      )}
+    </section>
   );
 }
 

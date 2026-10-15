@@ -8,7 +8,7 @@ const DEMO: PublicStartup = {
   id: "00000000-0000-4000-8000-000000000000", slug: "demo", name: "Pampa Labs", city: null, category: "agtech",
   link: "https://pampalabs.com.ar/", domain: "pampalabs.com.ar",
   logoUrl: "/sample/e96f60e2-4e09-4b54-ab98-0d9fe05c87c0.png", bgColor: "#f3e6d4", order: 42,
-  status: "approved", featured: false, createdAt: "2026-10-01T15:00:00Z", approvedAt: "2026-10-01T16:00:00Z",
+  status: "approved", featured: false, likes: 12, createdAt: "2026-10-01T15:00:00Z", approvedAt: "2026-10-01T16:00:00Z",
 };
 
 // Rendered on first visit, then cached. Edits and reviews invalidate the startup's tag.

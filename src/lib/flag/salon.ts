@@ -372,7 +372,10 @@ export class SalonScene {
   /** Lays out the hall. New startups on a pole (not in the previous call) rise up it. */
   setStartups(list: PublicStartup[]) {
     const prevIds = this.knownIds;
+    // Likes reorder the seats, so the showcase follows its startup by id, not by index.
+    const showingId = this.showing >= 0 ? this.list[this.showing]?.id : undefined;
     this.list = list;
+    if (showingId !== undefined) this.showing = list.findIndex((s) => s.id === showingId);
     this.knownIds = new Set(list.map((s) => s.id));
     this.rising.clear();
     this.poled = Math.min(list.length, HALL_POLES - 1); // one pole always free: the hoist needs it
@@ -388,8 +391,10 @@ export class SalonScene {
       this.placeFlag(i);
     }
     // In the showcase, the new hall stays hidden. Its startup left the list: back to the hall.
-    if (this.showing >= list.length) this.leaveShowcase();
-    else if (this.showing >= 0) {
+    if (showingId !== undefined && this.showing < 0) {
+      this.showing = 0; // leaveShowcase only runs from an open showcase
+      this.leaveShowcase();
+    } else if (this.showing >= 0) {
       this.setHall(false);
       this.paintShowcase();
     }

@@ -5,21 +5,21 @@ import { serviceClient } from "./supabase";
 
 export const FILES_PATH = "/files";
 const COLUMNS =
-  "id, slug, name, city, category, link, domain, logo_path, bg_color, order_number, status, featured, created_at, approved_at";
+  "id, slug, name, city, category, link, domain, logo_path, bg_color, order_number, status, featured, like_count, created_at, approved_at";
 /** The Hall of Fame list is cut here. Past this, the payload and the scene need paging. */
 export const SALON_MAX = 5000;
 
 interface Row {
   id: string; slug: string; name: string; city: string | null; category: string | null; link: string; domain: string;
   logo_path: string | null; bg_color: string; order_number: number; status: StartupStatus;
-  featured: boolean; created_at: string; approved_at: string | null;
+  featured: boolean; like_count: number; created_at: string; approved_at: string | null;
 }
 
 export function toPublic(r: Row): PublicStartup {
   return {
     id: r.id, slug: r.slug, name: r.name, city: r.city, category: r.category, link: r.link, domain: r.domain,
     logoUrl: r.logo_path ? `${FILES_PATH}/${r.logo_path}` : null,
-    bgColor: r.bg_color, order: Number(r.order_number), status: r.status, featured: r.featured,
+    bgColor: r.bg_color, order: Number(r.order_number), status: r.status, featured: r.featured, likes: Number(r.like_count ?? 0),
     createdAt: r.created_at, approvedAt: r.approved_at,
   };
 }
@@ -44,17 +44,20 @@ export function getStartup(slug: string): Promise<PublicStartup | null> {
   )();
 }
 
-/** Every approved startup, oldest first (by order number). Feeds the Hall of Fame. */
+/**
+ * Every approved startup in seat order (bySeat): most likes first, then oldest. Feeds the Hall of Fame.
+ * A like does not invalidate the tag (each like would refetch the list for everyone): counts refresh each minute.
+ */
 export const listApproved = unstable_cache(
   async (): Promise<PublicStartup[]> => {
     const { data, error } = await serviceClient()
       .from("startups").select(COLUMNS).eq("status", "approved")
-      .order("order_number", { ascending: true }).limit(SALON_MAX);
+      .order("like_count", { ascending: false }).order("order_number", { ascending: true }).limit(SALON_MAX);
     if (error) throw new Error(`salon read: ${error.message}`);
     return (data as Row[]).map(toPublic);
   },
   ["salon-list"],
-  { tags: [SALON_TAG], revalidate: 300 },
+  { tags: [SALON_TAG], revalidate: 60 },
 );
 
 /** Call after any change to a startup. Pages refresh on their next visit. */
