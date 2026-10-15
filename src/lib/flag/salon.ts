@@ -14,7 +14,7 @@ import { Birds } from "./birds";
 import { FrameAverage, applyFinish, canvasToBlob } from "./finish";
 import { ClothSim, type WindLook } from "./cloth";
 import { CLOUD_TOP, CloudSea } from "./cloudSea";
-import { CLOTH_NORMAL_REPEAT, applyBacklight, applyRim, applySunRim, clothNormalMap, type BacklightUniforms } from "./fabric";
+import { CLOTH_NORMAL_REPEAT, applyBacklight, applyMapFade, applyRim, applySunRim, clothNormalMap, type BacklightUniforms, type MapFadeUniforms } from "./fabric";
 import { farCrags, poleIsland, stoneMaterial } from "./islands";
 import { Motes } from "./motes";
 import { buildPole, poleMaterials } from "./pole";
@@ -61,6 +61,7 @@ const SHOW_POLE_H = ARG_POLE_H - 1.2;
 const SHOW_WARMUP = 4; // s of simulated wind before the flag shows, so it flies instead of hanging flat
 const SHOW_EYE_Y = 6.2; // m, camera height in the showcase
 const CUT_MS = 260; // fade out, and back in, around a jump between the hall and the showcase
+const SWAP_S = 0.5; // s for one showcase flag to turn into the next (the tour arrows)
 const POLE_RIM = 1.6; // gold outline on the poles against the sun
 const BIRD_FLOCKS = 3;
 const MOTE_GAIN = 1.0; // HDR, added per speck. Deep amber: bright points tone-map to white, and white specks read as snow
@@ -213,9 +214,12 @@ function hallWind(i: number): WindLook {
 
 /** The pair shot: the picked startup's cloth next to the Argentine flag. */
 interface Showcase {
-  mesh: THREE.Mesh;
-  tex: THREE.CanvasTexture;
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
+  tex: THREE.CanvasTexture; // the print on screen
   canvas: HTMLCanvasElement;
+  back: { tex: THREE.CanvasTexture; canvas: HTMLCanvasElement }; // the previous print, during a swap
+  fade: MapFadeUniforms;
+  fadeT: number; // 0..1 through a swap, linear; 1 at rest
   geo: THREE.BufferGeometry;
   cloth: ClothSim | null;
   parts: THREE.Object3D[]; // pole, finial, cloth, spot: shown and hidden together
@@ -607,6 +611,11 @@ export class SalonScene {
       this.events.onSelect?.(i);
       return;
     }
+    if (this.showing >= 0) {
+      this.swapShowcase(i);
+      this.events.onSelect?.(i);
+      return;
+    }
     this.cut(() => {
       this.enterShowcase(i);
       this.events.onSelect?.(i);
@@ -804,11 +813,18 @@ export class SalonScene {
     if (this.show) return this.show;
     const stand = this.standPole(SHOW_X, ARG_Z, SHOW_POLE_H, ARG_POLE_R, ARG_ROCK.radius * 0.75, ARG_ROCK.top - 0.3, 41);
 
-    const canvas = createCanvas(2100, 1350); // 1.5x the hero's canvas: the logo stays sharp at 4K
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const mat = this.fabricMaterial(tex, this.backlight());
+    // Two prints: the tour paints the next flag on the hidden one and cross-fades to it (swapShowcase).
+    const print = () => {
+      const canvas = createCanvas(2100, 1350); // 1.5x the hero's canvas: the logo stays sharp at 4K
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      return { canvas, tex };
+    };
+    const { canvas, tex } = print();
+    const back = print();
+    const fade: MapFadeUniforms = { uPrevMap: { value: back.tex }, uFade: { value: 1 } };
+    const mat = applyMapFade(this.fabricMaterial(tex, this.backlight()), fade);
     applyRim(mat, { uRimColor: { value: this.sunColor.clone().multiplyScalar(ARG_RIM) } });
     const geo = flagGeometry(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1]);
     const mesh = new THREE.Mesh(geo, mat);
@@ -824,7 +840,7 @@ export class SalonScene {
     const parts = [stand, mesh, spot, spot.target];
     for (const p of parts) p.visible = false;
     this.scene.add(...parts);
-    this.show = { mesh, tex, canvas, geo, cloth: null, parts, painted: "none" };
+    this.show = { mesh, tex, canvas, back, fade, fadeT: 1, geo, cloth: null, parts, painted: "none" };
     return this.show;
   }
 
@@ -844,12 +860,45 @@ export class SalonScene {
     this.showing = i;
     s.mesh.userData.index = i;
     this.paintShowcase();
+    this.endSwap();
     // A fresh cloth each time, flown for a few seconds while the view is faded out: it arrives flying.
     s.cloth = new ClothSim(ARG_W, ARG_H, ARG_SEGS[0], ARG_SEGS[1], ARG_CLOTH);
     for (let t = 0; t < SHOW_WARMUP; t += 1 / 60) s.cloth.update(1 / 60, s.geo);
     for (const p of s.parts) p.visible = true;
     this.setHall(false);
     if (aim) this.aimShowcase();
+  }
+
+  /**
+   * Showcase to showcase (the tour arrows): no fade to black, no fresh cloth, no camera reset. The same cloth
+   * keeps flying where the visitor left the view, and the next print fades in over the last one.
+   */
+  private swapShowcase(i: number) {
+    const s = this.show;
+    if (!s) return;
+    if (this.hovered >= 0) {
+      this.hovered = -1;
+      this.events.onHover?.(null);
+    }
+    // The print on screen becomes the fade's start; the hidden one takes the new flag.
+    [s.tex, s.back.tex] = [s.back.tex, s.tex];
+    [s.canvas, s.back.canvas] = [s.back.canvas, s.canvas];
+    s.mesh.material.map = s.tex;
+    s.mesh.material.sheenColorMap = s.tex;
+    s.fade.uPrevMap.value = s.back.tex;
+    this.showing = i;
+    s.mesh.userData.index = i;
+    this.paintShowcase();
+    s.fadeT = 0;
+    s.fade.uFade.value = 0;
+    if (this.reducedMotion()) this.endSwap();
+  }
+
+  /** Jumps a running swap to its end: the current print alone. */
+  private endSwap() {
+    if (!this.show) return;
+    this.show.fadeT = 1;
+    this.show.fade.uFade.value = 1;
   }
 
   /** Puts the camera on the showcase view for the current screen shape. */
@@ -941,6 +990,7 @@ export class SalonScene {
     this.camera.updateProjectionMatrix();
     if (this.showing !== i) this.enterShowcase(i, false);
     else if (this.show?.painted !== "logo") this.paintShowcase();
+    this.endSwap(); // a still image shows one flag, never two half-faded
     // The hero can still hang flat (a fresh load, or a tab in the background stalls its sim): fly it a little.
     if (this.argCloth && this.argGeo) for (let t = 0; t < SHOW_WARMUP; t += 1 / 60) this.argCloth.update(1 / 60, this.argGeo);
     const { pos, look } = this.showcaseView(width / height);
@@ -1005,6 +1055,7 @@ export class SalonScene {
     cancelAnimationFrame(this.raf);
     clearTimeout(this.cutTimer);
     this.show?.tex.dispose();
+    this.show?.back.tex.dispose();
     this.resizeObserver.disconnect();
     this.post.dispose();
     this.clouds.dispose();
@@ -1434,6 +1485,10 @@ export class SalonScene {
     this.birds.update(this.time);
     if (this.argCloth && this.argGeo) this.argCloth.update(dt, this.argGeo);
     if (this.showing >= 0 && this.show?.cloth) this.show.cloth.update(dt, this.show.geo);
+    if (this.show && this.show.fadeT < 1) {
+      const t = (this.show.fadeT = Math.min(1, this.show.fadeT + dt / SWAP_S));
+      this.show.fade.uFade.value = t * t * (3 - 2 * t);
+    }
 
     if (this.hall.visible) {
       this.camera.updateMatrixWorld();

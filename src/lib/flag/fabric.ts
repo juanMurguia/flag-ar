@@ -151,6 +151,38 @@ export function applyRim<M extends THREE.Material>(material: M, uniforms: RimUni
   return material;
 }
 
+export interface MapFadeUniforms {
+  uPrevMap: { value: THREE.Texture };
+  uFade: { value: number };
+}
+
+/**
+ * Cross-fades the print from `uPrevMap` (uFade 0) to the material's own map (uFade 1): one flag turns into
+ * the next on the same flying cloth. The print-tinted sheen follows. Both maps share the same UVs.
+ */
+export function applyMapFade<M extends THREE.Material>(material: M, uniforms: MapFadeUniforms): M {
+  const prev = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prev.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    const mapChunk = THREE.ShaderChunk.map_fragment.replace(
+      "texture2D( map, vMapUv )",
+      "mix( texture2D( uPrevMap, vMapUv ), texture2D( map, vMapUv ), uFade )",
+    );
+    const sheenChunk = THREE.ShaderChunk.lights_physical_fragment.replace(
+      "texture2D( sheenColorMap, vSheenColorMapUv )",
+      "mix( texture2D( uPrevMap, vSheenColorMapUv ), texture2D( sheenColorMap, vSheenColorMapUv ), uFade )",
+    );
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform sampler2D uPrevMap;\nuniform float uFade;")
+      .replace("#include <map_fragment>", mapChunk)
+      .replace("#include <lights_physical_fragment>", sheenChunk);
+  };
+  material.customProgramCacheKey = () => `${prevKey.call(material)}-mapfade`;
+  return material;
+}
+
 export interface SunRimUniforms {
   uRimSunDir: { value: THREE.Vector3 };
   uRimSunColor: { value: THREE.Color };
