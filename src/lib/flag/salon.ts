@@ -194,6 +194,8 @@ interface Slot {
   side: 1 | -1;
   /** Size of the whole stand (crag, pole and cloth). 1 in the hall. */
   s?: number;
+  /** Off the row: a category filter leaves this flag out. */
+  hidden?: boolean;
 }
 
 /** Row r's depth. Rows from the third on skip one step, so the Argentine flag stands in an open gap. */
@@ -305,6 +307,7 @@ export class SalonScene {
   private slots: Slot[] = [];
   private hallLayout: Slot[] = []; // the hall's seats, kept while the row view shows
   private layout: Layout = "hall";
+  private rowCategory: string | null = null; // the row shows only this category; null shows every flag
   private rowCenters: { x: number; s: number }[] = []; // cloth centers left to right, for the row camera
   private rowPan = false; // the opening slide along the row runs until any input
   private cols = 10;
@@ -718,7 +721,7 @@ export class SalonScene {
    * have no hall flag to fly to: when none is on a pole, the first match opens in the showcase.
    */
   focusAny(indices: number[]) {
-    const onPole = indices.filter((i) => i < this.poled);
+    const onPole = indices.filter((i) => i < this.poled && !this.slots[i]?.hidden); // the row's filter hides some
     if (!onPole.length && indices.length) {
       this.focus(indices[0]);
       return;
@@ -805,13 +808,21 @@ export class SalonScene {
 
   // ---------- Row view ----------
 
-  /** Switches between the hall and the row view. A quick fade hides the cut. */
-  setLayout(mode: Layout) {
-    if (mode === this.layout) return;
-    this.cut(() => this.applyLayout(mode));
+  /**
+   * Switches between the hall and the row view. In the row, `category` keeps only that category's flags,
+   * still in seat order. A quick fade hides the cut.
+   */
+  setLayout(mode: Layout, category: string | null = null) {
+    if (mode !== "row") category = null;
+    if (mode === this.layout && category === this.rowCategory) return;
+    this.cut(() => {
+      this.rowCategory = category;
+      this.applyLayout(mode);
+    });
   }
 
   private applyLayout(mode: Layout) {
+    if (mode === "hall") this.rowCategory = null;
     this.leaveShowcase();
     if (mode === "row" && this.claim) this.dropClaim();
     this.layout = mode;
@@ -848,8 +859,14 @@ export class SalonScene {
   /** Slots for the current layout, and the row camera's cloth centers. */
   private setSlots() {
     if (this.layout === "row") {
-      this.slots = rowSlots(this.list.slice(0, this.poled).map((s) => s.likes));
-      this.rowCenters = this.slots.map((p) => ({ x: p.x + ((p.s ?? 1) * FLAG_W) / 2, s: p.s ?? 1 })).sort((a, b) => a.x - b.x);
+      // A category filter sizes its flags against each other. If the category empties out, the row shows all.
+      const poled = this.list.slice(0, this.poled);
+      let keep = poled.flatMap((s, i) => (this.rowCategory === null || s.category === this.rowCategory ? [i] : []));
+      if (!keep.length) keep = poled.map((_, i) => i);
+      const row = rowSlots(keep.map((i) => poled[i].likes));
+      this.slots = poled.map((): Slot => ({ x: 0, z: ROW_Z, side: 1, hidden: true }));
+      keep.forEach((i, k) => (this.slots[i] = row[k]));
+      this.rowCenters = row.map((p) => ({ x: p.x + ((p.s ?? 1) * FLAG_W) / 2, s: p.s ?? 1 })).sort((a, b) => a.x - b.x);
     } else {
       this.slots = this.hallLayout;
       this.rowCenters = [];
@@ -1404,9 +1421,9 @@ export class SalonScene {
 
   /** The visitor's own flag covers the claimed slot's cloth. */
   private refreshFlags() {
-    const n = this.slots.length;
-    this.stands.forEach((s, i) => (s.visible = i < n));
-    this.flags.forEach((f, i) => (f.mesh.visible = i < n && !(this.claim && this.claim.slot === i)));
+    const n = this.slots.length, on = (i: number) => i < n && !this.slots[i].hidden;
+    this.stands.forEach((s, i) => (s.visible = on(i)));
+    this.flags.forEach((f, i) => (f.mesh.visible = on(i) && !(this.claim && this.claim.slot === i)));
   }
 
   /** Eases the hovered flag in (a faint warm glow) and the previous one back out. */

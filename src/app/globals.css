@@ -421,6 +421,18 @@ h1, h2 { text-wrap: balance; }
 .hd-btn[aria-pressed="false"] { color: var(--muted); opacity: 0.5; }
 .hd-btn[aria-pressed="true"] { background: rgba(0, 0, 0, 0.08); }
 .salon.hoisting .salon-corner { display: none; }
+/* Row category: a quiet text chip beside "Fila", as wide as its name. The select on top is clear: it only
+   takes the click and opens the list. Long names cut short; the open list shows them whole. */
+.row-cat {
+  position: relative; display: block; width: auto; max-width: 140px; padding: 0 10px; line-height: 28px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  animation: drop-in 220ms var(--ease-out) both;
+}
+.row-cat select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.row-cat:has(select:focus-visible) { outline: 2px solid var(--ink); outline-offset: 1px; }
+.row-cat[data-on="false"] { color: var(--muted); }
+.row-cat[data-on="true"] { background: rgba(0, 0, 0, 0.08); }
+@media (pointer: coarse) { .salon-corner .row-cat { width: auto; line-height: 36px; } }
 
 /* Phones: the bar spans the width, search takes the slack. */
 @media (max-width: 640px) {

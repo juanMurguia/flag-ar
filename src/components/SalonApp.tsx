@@ -73,6 +73,12 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   const [view, setView] = useState<"3d" | "grid" | null>(null);
   // 3D layout: the hall, or every flag in one row sized by its likes.
   const [layout, setLayout] = useState<Layout>("hall");
+  // The row can show one category only. Null shows every flag.
+  const [rowCat, setRowCat] = useState<string | null>(null);
+  const rowCatRef = useRef(rowCat);
+  rowCatRef.current = rowCat;
+  // The picker lists only the categories that have a flag.
+  const rowCats = useMemo(() => CATEGORIES.filter((c) => all.some((s) => s.category === c.key)), [all]);
   const [query, setQuery] = useState("");
   // High quality: null until the scene picks its device default. A saved choice wins over the default.
   const [high, setHigh] = useState<boolean | null>(null);
@@ -180,6 +186,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
     }
     hoistSlot.current = slot;
     setLayout("hall"); // the hoist happens in the hall: claimSlot leaves the row view
+    setRowCat(null);
     setPicked(null);
     setFreePick(null);
     if (location.pathname === "/izar") s.claimSlot(slot); // already open: another empty pole takes the flag
@@ -346,14 +353,18 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   }
   const freeSlots = (view === "3d" && scene.current?.emptySlots()) || [];
   if (freePick !== null && freeSlots.includes(freePick)) navRef.current = all.length + freeSlots.indexOf(freePick);
-  const stops = all.length + freeSlots.length;
+  // A category row tours only its own flags, and counts them on its own.
+  const tour = useMemo(() => (rowCat ? all.filter((s) => s.category === rowCat) : all), [all, rowCat]);
+  const stops = tour.length + freeSlots.length;
   const step = useCallback((d: 1 | -1) => {
     const s = scene.current;
     if (!s) return;
-    const n = listRef.current.length, free = s.emptySlots(), total = n + free.length;
-    if (!total) return;
-    const cur = navRef.current;
-    const next = cur === null ? (d > 0 ? 0 : total - 1) : (cur + d + total) % total;
+    const list = listRef.current, n = list.length, free = s.emptySlots(), total = n + free.length;
+    const cat = rowCatRef.current;
+    const inTour = (i: number) => i >= n || cat === null || list[i].category === cat;
+    if (!total || (!free.length && !list.some((_, i) => inTour(i)))) return;
+    let next = navRef.current === null ? (d > 0 ? 0 : total - 1) : (navRef.current + d + total) % total;
+    while (!inTour(next)) next = (next + d + total) % total;
     navRef.current = next;
     if (next < n) {
       setFreePick(null);
@@ -441,10 +452,19 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
   function toggleLayout() {
     const next = layout === "hall" ? "row" : "hall";
     setLayout(next);
+    setRowCat(null);
     setPicked(null);
     setFreePick(null);
     navRef.current = null;
     scene.current?.setLayout(next);
+  }
+
+  function pickRowCat(cat: string | null) {
+    setRowCat(cat);
+    setPicked(null);
+    setFreePick(null);
+    navRef.current = null;
+    scene.current?.setLayout("row", cat);
   }
 
   function toggleSound() {
@@ -525,6 +545,17 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
           >
             Fila
           </button>
+          {/* Only in the row: one category at a time. The chip shows the short name ("SaaS", not "SaaS /
+              Software B2B"); a clear native select covers it, so phones get their own picker. */}
+          {layout === "row" && rowCats.length > 1 && (
+            <label className="bar-btn hd-btn row-cat" data-on={rowCat !== null}>
+              {rowCat ? categoryLabel(rowCat)?.split(" / ")[0] : "Todas"}
+              <select value={rowCat ?? ""} aria-label="Categoría de la fila" onChange={(e) => pickRowCat(e.target.value || null)}>
+                <option value="">Todas</option>
+                {rowCats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            </label>
+          )}
           <button
             type="button" className="bar-btn" data-sound aria-pressed={sound} onClick={toggleSound}
             aria-label="Sonido" title={sound ? "Silenciar" : "Activar sonido"}
@@ -588,7 +619,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
                 <Icon name="heart" size={13} />
                 <span>{likesOf(shown).toLocaleString("es-AR")}</span>
               </button>
-              {stops > 1 && <span className="salon-card-count">{(all.findIndex((x) => x.id === shown.id) + 1) || "–"} / {stops}</span>}
+              {stops > 1 && <span className="salon-card-count">{(tour.findIndex((x) => x.id === shown.id) + 1) || "–"} / {stops}</span>}
               <div className="salon-card-actions">
                 <a
                   className="text-link" href={xIntent(shareText(shown.name, shown.order), `${SITE}/${shown.slug}`)}
@@ -658,7 +689,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
                 {/* The row compares by likes: its label says the rank and the count. */}
                 {layout === "row" && (
                   <span className="tip-chip tip-likes">
-                    #{hovered.index + 1} · {likesOf(s).toLocaleString("es-AR")} <Icon name="heart" size={10} />
+                    #{(tour.findIndex((x) => x.id === s.id) + 1) || hovered.index + 1} ·{likesOf(s).toLocaleString("es-AR")} <Icon name="heart" size={10} />
                     <span className="sr-only">likes</span>
                   </span>
                 )}
