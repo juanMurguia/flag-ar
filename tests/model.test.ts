@@ -65,20 +65,25 @@ describe("default flag color", () => {
 
 describe("salon layout", () => {
   it("alternates sides and never puts two flags on one spot", () => {
-    const slots = hallSlots(12);
+    const slots = hallSlots(12, 3);
     expect(slots).toHaveLength(12);
     expect(new Set(slots.map((p) => `${p.x},${p.z}`)).size).toBe(12);
     expect(slots[0].side).toBe(-1);
     expect(slots[1].side).toBe(1);
   });
-  it("puts the first four in one front row, even around the axis", () => {
-    const row = hallSlots(4);
+  it("puts the first six in one front row, even around the axis", () => {
+    const row = hallSlots(6, 3);
     expect(new Set(row.map((p) => p.z)).size).toBe(1);
     const centers = row.map((p) => p.x + 3.1 / 2); // cloths fly to the right of the pole
     expect(centers[0]).toBeCloseTo(-centers[1]);
-    expect(centers[2]).toBeCloseTo(-centers[3]);
+    expect(centers[4]).toBeCloseTo(-centers[5]);
     expect(Math.abs(centers[0])).toBeLessThan(Math.abs(centers[2]));
-    expect(hallSlots(5)[4].z).toBeLessThan(row[0].z);
+    expect(Math.abs(centers[2])).toBeLessThan(Math.abs(centers[4]));
+    expect(hallSlots(7, 3)[6].z).toBeLessThan(row[0].z);
+  });
+  it("staggers the second row half a step outward", () => {
+    const [a, , , , , , b] = hallSlots(7, 3);
+    expect(Math.abs(b.x - a.x)).toBeCloseTo(4.5 / 2);
   });
   it("gives neighbors different wave phases", () => {
     expect(Math.abs(phaseOf(1) - phaseOf(0))).toBeGreaterThan(0.5);

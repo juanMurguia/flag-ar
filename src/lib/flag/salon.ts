@@ -119,6 +119,8 @@ const STILL_SAMPLES = 16;
 const STILL_CLOUD_STEPS = 128;
 const STILL_FOCUS_RANGE = 1.5;
 const STILL_BOKEH = 16;
+// The live hall uses a softer lens than the wallpaper, so the far flags stay readable.
+const LIVE_BOKEH_SCALE = 0.6;
 
 /** Low-discrepancy sequence in [0, 1): sub-pixel offsets that cover the pixel evenly. */
 function halton(i: number, base: number) {
@@ -182,15 +184,19 @@ function rowZ(r: number) {
 }
 
 /**
- * The hall: rows of four, two cloths each side of the hero, best seats first (front row, inner, then outer,
+ * The hall: rows of `perSide` cloths each side of the hero, best seats first (front row, inner, then outer,
  * left before right). Cloths fly to the right of their pole, so each pole stands half a cloth left of the
- * cloth center: the row looks even around the axis. Further rows stand DZ behind.
+ * cloth center: the row looks even around the axis. Further rows stand DZ behind. Odd rows shift half a
+ * step outward, like bricks: each back flag shows in the gap between two in front.
  */
-export function hallSlots(n: number): Slot[] {
+export function hallSlots(n: number, perSide: number): Slot[] {
+  const perRow = perSide * 2;
   return Array.from({ length: n }, (_, i) => {
     const side: 1 | -1 = i % 2 === 0 ? -1 : 1;
-    const col = Math.floor((i % 4) / 2);
-    return { x: side * (HALL_INNER + col * HALL_DX) - FLAG_W / 2, z: rowZ(Math.floor(i / 4)), side };
+    const col = Math.floor((i % perRow) / 2);
+    const row = Math.floor(i / perRow);
+    const shift = row % 2 === 1 ? HALL_DX / 2 : 0;
+    return { x: side * (HALL_INNER + shift + col * HALL_DX) - FLAG_W / 2, z: rowZ(row), side };
   });
 }
 
@@ -423,7 +429,9 @@ export class SalonScene {
     this.poled = Math.min(list.length, SALON_SEATS);
     const count = this.poled < SALON_SEATS ? this.poled + 1 : this.poled; // one pole free while seats are left: the hoist needs it
     this.cols = 2;
-    this.slots = hallSlots(count);
+    // Phones are narrow: a third cloth each side would start out of frame.
+    const narrow = window.matchMedia?.("(max-width: 767px)").matches;
+    this.slots = hallSlots(count, narrow ? 2 : 3);
     this.buildHall();
     if (prevIds) {
       for (let i = 0; i < this.poled; i++) if (!prevIds.has(list[i].id)) this.rising.set(i, this.time);
@@ -1336,8 +1344,8 @@ export class SalonScene {
     const k = 1 - Math.exp(-5 * dt);
     this.liveFocus.target.lerp(this.focusGoal, k);
     this.liveFocus.range += (this.focusRangeGoal - this.liveFocus.range) * k;
-    // Bokeh is in pixels: scale the wallpaper's 16 at 2160 rows to this canvas.
-    this.liveFocus.bokeh = (STILL_BOKEH * this.renderer.domElement.height) / 2160;
+    // Bokeh is in pixels: scale the wallpaper's 16 at 2160 rows to this canvas, then soften it for live view.
+    this.liveFocus.bokeh = (STILL_BOKEH * LIVE_BOKEH_SCALE * this.renderer.domElement.height) / 2160;
   }
 
   private lookFrom(from: THREE.Vector3, yaw: number, pitch: number) {
