@@ -8,7 +8,7 @@ import type { Layout, SalonFx, SalonScene } from "@/lib/flag/salon";
 import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
-import { xIntent } from "./Share";
+import { shareText, xIntent } from "./Share";
 import Icon from "./Icon";
 import { useLikes } from "./useLikes";
 import { toast } from "./Toast";
@@ -590,6 +590,12 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
               </button>
               {stops > 1 && <span className="salon-card-count">{(all.findIndex((x) => x.id === shown.id) + 1) || "–"} / {stops}</span>}
               <div className="salon-card-actions">
+                <a
+                  className="text-link" href={xIntent(shareText(shown.name, shown.order), `${SITE}/${shown.slug}`)}
+                  target="_blank" rel="noopener noreferrer"
+                >
+                  Compartir en X <Icon name="external" size={12} />
+                </a>
                 <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
                   {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
                 </button>
