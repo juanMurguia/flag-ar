@@ -449,13 +449,23 @@ h1, h2 { text-wrap: balance; }
 }
 .empty-search p { margin: 0; }
 
-/* Flag card: rises from the corner it lives in, and leaves the same way. */
+/* Flag card: a wide strip, centered at the bottom, an arrow at each end. Rises from the bottom and leaves
+   the same way. */
 .salon-card {
-  position: absolute; z-index: 3; right: 16px; bottom: max(16px, env(safe-area-inset-bottom));
-  width: min(260px, calc(100% - 32px)); display: grid; gap: 4px; padding: 14px; border-radius: var(--radius-lg);
-  color: var(--ink); transform-origin: bottom right;
+  position: absolute; z-index: 3; left: 0; right: 0; margin: 0 auto; bottom: max(16px, env(safe-area-inset-bottom));
+  width: min(600px, calc(100% - 32px)); display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 12px; padding: 12px 10px; border-radius: var(--radius-lg);
+  color: var(--ink); transform-origin: bottom center;
   animation: card-in var(--enter) var(--ease-out) both;
 }
+.salon-card-body { grid-column: 2; }
+.salon-card-arrow { width: 32px; height: 32px; }
+.salon-card-arrow:last-child { grid-column: 3; }
+.salon-card-summary {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  animation: swap-in 220ms var(--ease-out) both;
+}
+.salon-card-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .salon-card[data-state="closing"] { animation: card-out var(--exit) var(--ease-out) both; pointer-events: none; }
 /* Picking another flag swaps the content in place; the card stays. */
 .salon-card-body { display: grid; gap: 4px; animation: swap-in 220ms var(--ease-out) both; }
@@ -479,12 +489,10 @@ h1, h2 { text-wrap: balance; }
   .salon-card h2, .salon-card-text, .salon-card .startup-trail { padding-right: 56px; }
 }
 @media (pointer: coarse), (hover: none) { .key { display: none; } }
-.salon-card-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+/* The actions close the row, pushed to its right end. */
+.salon-card-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; }
 .salon-card-actions .text-link { display: inline-flex; align-items: center; gap: 4px; }
-/* Flag by flag: arrows inside the card while one is open, a pill at the bottom while none is. */
-.salon-card-nav { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
-.salon-card-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
-.salon-card-row .salon-card-nav { margin-top: 0; }
+.salon-card-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
 .salon-nav {
   position: absolute; z-index: 2; left: 50%; translate: -50% 0; bottom: max(16px, env(safe-area-inset-bottom));
   display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px;
@@ -620,7 +628,7 @@ h1, h2 { text-wrap: balance; }
    32 px: they sit in rows of text and should not crowd them.
    The top row grows to 36 px together (search and corner), so it still reads as one line. */
 @media (pointer: coarse) {
-  .salon-nav .bar-btn, .salon-card-nav .bar-btn { width: 32px; height: 32px; }
+  .salon-nav .bar-btn { width: 32px; height: 32px; }
   .salon-nav .nav-cta, .salon-card .nav-cta { height: 44px; padding: 0 16px 0 12px; font-size: 13px; }
   .salon-card-close { width: 40px; height: 40px; top: 4px; right: 4px; }
   .search { height: 36px; }
@@ -628,17 +636,13 @@ h1, h2 { text-wrap: balance; }
 }
 
 /* Phones: the tour is a dock across the bottom, arrows left, call to action right. The flag card is a
-   bottom sheet with the same arrows in a full-width row and its actions as real buttons. The ranking steps
+   bottom sheet, an arrow at each side, its actions as real buttons. The ranking steps
    aside while a card is open: on a narrow screen it would cover the flag. */
 @media (max-width: 640px) {
   .salon-nav { left: 12px; right: 12px; translate: none; justify-content: flex-start; bottom: max(12px, env(safe-area-inset-bottom)); }
   .salon-nav .nav-cta { margin-left: auto; }
-  .salon-card { left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); padding: 16px; gap: 6px; }
-  .salon-card-nav {
-    width: fit-content; padding: 0; border-radius: 999px; background: rgba(0, 0, 0, 0.05);
-    font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums;
-  }
-  .salon-card-actions { gap: 6px; margin-top: 6px; }
+  .salon-card { left: 12px; right: 12px; width: auto; bottom: max(12px, env(safe-area-inset-bottom)); padding: 14px 6px; gap: 6px; }
+  .salon-card-actions { gap: 6px; margin-left: 0; }
   .salon-card-actions .text-link {
     height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px;
     background: rgba(255, 255, 255, 0.55); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);

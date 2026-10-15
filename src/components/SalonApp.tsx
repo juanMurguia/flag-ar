@@ -546,6 +546,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
             <kbd className="key" aria-hidden="true">Esc</kbd>
             <Icon name="close" size={13} />
           </button>
+          {stops > 1 && <CardArrow dir={-1} step={step} />}
           {/* Keyed by flag: picking another one swaps the content in place while the card stays. */}
           <div className="salon-card-body" key={shown.id}>
             <p className="startup-trail">
@@ -558,7 +559,8 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
                 {shown.name} <Icon name="external" size={14} />
               </a>
             </h2>
-            {/* Like and arrows share one row: the card holds the whole flag page now, so it saves height. */}
+            <Summary slug={shown.slug} />
+            {/* Like, position and actions share one row: the card is wide, not tall. */}
             <div className="salon-card-row">
               <button
                 type="button" className="like-btn" aria-pressed={liked.has(shown.id)} onClick={() => toggleLike(shown)}
@@ -568,20 +570,21 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
                 <Icon name="heart" size={13} />
                 <span>{likesOf(shown).toLocaleString("es-AR")}</span>
               </button>
-              {stops > 1 && <CardNav at={(all.findIndex((x) => x.id === shown.id) + 1) || null} of={stops} step={step} />}
-            </div>
-            <div className="salon-card-actions">
-              <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
-                {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
-              </button>
-              <button
-                type="button" className="text-link" onClick={copyBadge}
-                title="Tu puesto en vivo, para tu web o tu README"
-              >
-                Insignia <Icon name="copy" size={12} />
-              </button>
+              {stops > 1 && <span className="salon-card-count">{(all.findIndex((x) => x.id === shown.id) + 1) || "–"} / {stops}</span>}
+              <div className="salon-card-actions">
+                <button type="button" className="text-link" onClick={wallpaper} disabled={wallpaperBusy} aria-busy={wallpaperBusy}>
+                  {wallpaperBusy ? <>Generando… <span className="spinner" aria-hidden="true" style={{ display: "inline-block", verticalAlign: "-2px" }} /></> : <>{touch ? "Fondo de pantalla" : "Fondo 4K"} <Icon name="download" size={12} /></>}
+                </button>
+                <button
+                  type="button" className="text-link" onClick={copyBadge}
+                  title="Tu puesto en vivo, para tu web o tu README"
+                >
+                  Insignia <Icon name="copy" size={12} />
+                </button>
+              </div>
             </div>
           </div>
+          {stops > 1 && <CardArrow dir={1} step={step} />}
         </aside>
       )}
 
@@ -591,14 +594,18 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
             <kbd className="key" aria-hidden="true">Esc</kbd>
             <Icon name="close" size={13} />
           </button>
+          {stops > 1 && <CardArrow dir={-1} step={step} />}
           <div className="salon-card-body" key={`free-${freePick}`}>
             <h2 id="salon-free-name">Mástil libre</h2>
             <p className="salon-card-text">Tu startup puede flamear acá, al lado de la bandera argentina.</p>
-            {stops > 1 && <CardNav at={all.length + freeSlots.indexOf(freePick) + 1} of={stops} step={step} />}
-            <div className="salon-card-actions">
-              <button type="button" className="nav-cta" onClick={() => openHoist(freePick)}>Izar mi bandera acá</button>
+            <div className="salon-card-row">
+              {stops > 1 && <span className="salon-card-count">{all.length + freeSlots.indexOf(freePick) + 1} / {stops}</span>}
+              <div className="salon-card-actions">
+                <button type="button" className="nav-cta" onClick={() => openHoist(freePick)}>Izar mi bandera acá</button>
+              </div>
             </div>
           </div>
+          {stops > 1 && <CardArrow dir={1} step={step} />}
         </aside>
       )}
 
@@ -683,18 +690,35 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
 const RANK_FOLDED = 3;
 
 /** The tour's arrows inside a card: previous, "2 / 4", next. */
-function CardNav({ at, of, step }: { at: number | null; of: number; step: (d: 1 | -1) => void }) {
+/** One arrow per card edge: back on the left, forward on the right. */
+function CardArrow({ dir, step }: { dir: 1 | -1; step: (d: 1 | -1) => void }) {
   return (
-    <div className="salon-card-nav">
-      <button type="button" className="bar-btn" onClick={() => step(-1)} aria-label="Anterior">
-        <Icon name="prev" size={14} />
-      </button>
-      <span>{at ?? "–"} / {of}</span>
-      <button type="button" className="bar-btn" onClick={() => step(1)} aria-label="Siguiente">
-        <Icon name="next" size={14} />
-      </button>
-    </div>
+    <button
+      type="button" className="bar-btn salon-card-arrow" onClick={() => step(dir)}
+      aria-label={dir < 0 ? "Anterior" : "Siguiente"}
+    >
+      <Icon name={dir < 0 ? "prev" : "next"} size={16} />
+    </button>
   );
+}
+
+/** Fetched summaries, kept for the visit: stepping back to a flag shows its line at once. */
+const summaries = new Map<string, string | null>();
+
+/** What the startup does, in its own site's words. Nothing shows until it arrives, or when the site has none. */
+function Summary({ slug }: { slug: string }) {
+  const [text, setText] = useState<string | null>(() => summaries.get(slug) ?? null);
+  useEffect(() => {
+    if (summaries.has(slug)) return;
+    const ctrl = new AbortController();
+    fetch(`/api/summary/${encodeURIComponent(slug)}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : { summary: null }))
+      .then((d: { summary: string | null }) => { summaries.set(slug, d.summary); setText(d.summary); })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [slug]);
+  if (!text) return null;
+  return <p className="salon-card-text salon-card-summary">{text}</p>;
 }
 
 /** Gold, silver and bronze stand in for #1, #2 and #3. */
