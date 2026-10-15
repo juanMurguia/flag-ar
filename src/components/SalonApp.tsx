@@ -649,7 +649,7 @@ function Ranking({ list, likesOf, onPick }: {
         {rows.map(({ s, likes }, i) => (
           <li key={s.id}>
             <button type="button" onClick={() => onPick(s)} title={`Ir a ${s.name}`}>
-              <span className="ranking-pos">{i + 1}</span>
+              <span className="ranking-pos">#{i + 1}</span>
               <span className="ranking-name">{s.name}</span>
               <span className="ranking-likes">
                 {likes.toLocaleString("es-AR")}
