@@ -44,8 +44,14 @@ function normalize(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
-/** Home, the Hall of Fame: a 3D walk (a plain list without WebGL2). Clicking a flag opens its pair page. */
-export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
+/**
+ * Home, the Hall of Fame: a 3D walk (a plain list without WebGL2). An open card puts its flag in the URL
+ * (/<slug>), and /<slug> opens the hall on that flag, so every flag has a link to share. `fallback` stands in
+ * for the plain list on /<slug> without WebGL2.
+ */
+export default function SalonApp({ initial, focusSlug, fallback }: {
+  initial: PublicStartup[]; focusSlug?: string; fallback?: React.ReactNode;
+}) {
   const holder = useRef<HTMLDivElement>(null);
   const scene = useRef<SalonScene | null>(null);
   const [fetched, setAll] = useState(initial);
@@ -176,6 +182,16 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   }, []);
   const hoistClosed = useCallback(() => setHoist((h) => (h === "closing" ? "closed" : h)), []);
 
+  // The open card's flag lives in the URL, so the address bar always holds a link to share. Replace, not
+  // push: the tour visits many flags, and Back should leave the hall, not step through each one. /izar owns
+  // the URL while the sheet is open. On /<slug>, the URL waits until the hall has flown to that flag.
+  const focused = useRef(!focusSlug);
+  useEffect(() => {
+    if (view !== "3d" || !focused.current || location.pathname === "/izar") return;
+    const path = picked ? `/${picked.slug}` : "/";
+    if (location.pathname !== path) history.replaceState(null, "", path + location.search);
+  }, [picked, view, pathname]);
+
   // The URL drives the sheet, so Back and Forward work like a page change.
   useEffect(() => {
     const s = scene.current;
@@ -299,6 +315,14 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
   useEffect(() => {
     scene.current?.setStartups(listRef.current);
   }, [layoutKey]);
+
+  // /<slug>: once the hall is on screen, fly to that flag. Its card opens on arrival.
+  useEffect(() => {
+    if (!ready || focused.current) return;
+    focused.current = true;
+    const i = listRef.current.findIndex((x) => x.slug === focusSlug);
+    if (i >= 0) scene.current?.focus(i);
+  }, [ready, focusSlug]);
 
   // Flag by flag: the arrows (on screen, and ← → on the keyboard) visit every startup in seat order (front
   // to back, left and right in turn), then every empty pole. With one startup the tour still goes somewhere:
@@ -432,6 +456,8 @@ export default function SalonApp({ initial }: { initial: PublicStartup[] }) {
     `${query.trim()} todavía no flamea en el Salón de la Fama de las startups argentinas. ¿La izás? 🇦🇷 #FlagAR`,
     "https://flag.ar",
   );
+
+  if (view === "grid" && fallback) return fallback;
 
   return (
     <main className={`salon${view === "grid" ? " grid-mode" : ""}${view !== "grid" && !ready ? " loading" : ""}${hoist === "open" ? " hoisting" : ""}${shown || freePick !== null ? " card-open" : ""}`}>

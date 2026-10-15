@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import SalonApp from "@/components/SalonApp";
 import StartupView from "@/components/StartupView";
-import { getStartup } from "@/lib/server/startups";
+import { getStartup, listApproved } from "@/lib/server/startups";
 import { categoryLabel, isValidSlug, type PublicStartup } from "@/lib/startups/model";
 
 const DEMO: PublicStartup = {
@@ -11,8 +12,8 @@ const DEMO: PublicStartup = {
   status: "approved", featured: false, likes: 12, createdAt: "2026-10-01T15:00:00Z", approvedAt: "2026-10-01T16:00:00Z",
 };
 
-// Rendered on first visit, then cached. Edits and reviews invalidate the startup's tag.
-export const revalidate = 3600;
+// Rendered on first visit, then cached like home. Edits and reviews invalidate the startup's tag.
+export const revalidate = 300;
 
 // No pages at build time; each one renders on its first visit, then stays cached (ISR).
 export async function generateStaticParams() {
@@ -46,5 +47,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function StartupPage({ params }: { params: Promise<{ slug: string }> }) {
   const s = await load(params);
   if (!s) notFound();
-  return <StartupView startup={s} />;
+  const page = <StartupView startup={s} />;
+  // A flag in review is not in the hall yet: it keeps its own page.
+  if (s.status !== "approved") return page;
+  // An approved flag opens the hall flown to it. The hall list may lag a fresh approval: add the flag then.
+  const list = await listApproved().catch(() => []);
+  const startups = list.some((x) => x.id === s.id) ? list : [...list, s];
+  return <SalonApp initial={startups} focusSlug={s.slug} fallback={page} />;
 }
