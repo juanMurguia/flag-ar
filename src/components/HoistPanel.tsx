@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LogoImage } from "@/lib/flag/texture";
 import { ACCEPT, lookupLogo, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
-import { CATEGORIES, SALON_SEATS, seatsLine } from "@/lib/startups/model";
+import { CATEGORIES, SALON_SEATS } from "@/lib/startups/model";
 import { toast } from "./Toast";
 import Icon from "./Icon";
 
@@ -29,7 +29,7 @@ export default function HoistPanel({
 }: {
   scene: RefObject<HoistStage | null>;
   webgl: boolean | null;
-  /** Approved flags (seats taken). Null while unknown: the seats line stays hidden. */
+  /** Approved flags (seats taken). Null while unknown. */
   taken?: number | null;
   closing?: boolean;
   /** `instant` skips the exit animation (keyboard close). */
@@ -232,7 +232,6 @@ export default function HoistPanel({
     >
       <button className="card-close" onClick={() => onClose()} aria-label="Cerrar" title="Cerrar"><Icon name="close" /></button>
       <h2 id="hoist-title">Izá tu bandera</h2>
-      {taken !== null && <p className="seats-note">{seatsLine(taken)}</p>}
       <form onSubmit={submit}>
         <label
           className={`drop${drag ? " over" : ""}`}

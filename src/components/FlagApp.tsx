@@ -23,7 +23,7 @@ export default function FlagApp() {
   // Keyboard closes (Escape) skip the exit animation: they repeat often and must feel instant.
   const close = useCallback((instant?: boolean) => setPanel(instant ? "closed" : "closing"), []);
   const closed = useCallback(() => setPanel((p) => (p === "closing" ? "closed" : p)), []);
-  // Approved flags, for the seats line in the sheet. /izar is static, so it asks the CDN-cached hall endpoint.
+  // Approved flags, so the sheet knows when the hall is full. /izar is static, so it asks the CDN-cached hall endpoint.
   const [taken, setTaken] = useState<number | null>(null);
   useEffect(() => {
     fetch("/api/salon").then((r) => (r.ok ? r.json() : null)).then((d) => typeof d?.count === "number" && setTaken(d.count))

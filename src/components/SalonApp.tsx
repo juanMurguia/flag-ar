@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import HoistPanel from "./HoistPanel";
 import type { Layout, SalonFx, SalonScene } from "@/lib/flag/salon";
-import { CATEGORIES, bySeat, categoryLabel, seatsLine, type PublicStartup } from "@/lib/startups/model";
+import { CATEGORIES, bySeat, categoryLabel, type PublicStartup } from "@/lib/startups/model";
 import { saveBlob } from "@/lib/flag/downloads";
 import { Ambience } from "@/lib/flag/ambience";
 import { shareText, xIntent } from "./Share";
@@ -533,7 +533,6 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
           />
         </label>
       </header>
-      {view === "3d" && <p className="salon-seats">{seatsLine(all.length)}</p>}
       {view !== null && !q && hoist === "closed" && <Ranking list={all} likesOf={likesOf} onPick={go} />}
 
       {/* Quality lives apart from navigation: its own pill in the top-right corner. */}

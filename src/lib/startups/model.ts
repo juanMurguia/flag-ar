@@ -9,13 +9,6 @@ export type StartupStatus = "pending" | "approved" | "rejected";
  */
 export const SALON_SEATS = 100;
 
-/** One quiet line about the seats left. `taken` is the number of approved flags. */
-export function seatsLine(taken: number): string {
-  const left = Math.max(0, SALON_SEATS - taken);
-  if (left === 0) return "Salón completo · Lista de espera abierta";
-  return `${left === 1 ? "Queda 1" : `Quedan ${left}`} de ${SALON_SEATS} lugares · Cada bandera se revisa`;
-}
-
 /** Hall of Fame seat order: most likes first; on a tie, the older flag (lower order number) first. */
 export function bySeat(a: Pick<PublicStartup, "likes" | "order">, b: Pick<PublicStartup, "likes" | "order">): number {
   return b.likes - a.likes || a.order - b.order;
