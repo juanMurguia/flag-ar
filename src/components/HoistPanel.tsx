@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LogoImage } from "@/lib/flag/texture";
 import { ACCEPT, lookupLogo, prepareUpload, type PreparedLogo } from "@/lib/flag/logoUpload";
-import { CATEGORIES, SALON_SEATS } from "@/lib/startups/model";
+import { CATEGORIES } from "@/lib/startups/model";
 import { toast } from "./Toast";
 import Icon from "./Icon";
 
@@ -25,12 +25,10 @@ export interface HoistStage {
  * Hall of Fame.
  */
 export default function HoistPanel({
-  scene, webgl, taken = null, closing = false, onClose, onClosed,
+  scene, webgl, closing = false, onClose, onClosed,
 }: {
   scene: RefObject<HoistStage | null>;
   webgl: boolean | null;
-  /** Approved flags (seats taken). Null while unknown. */
-  taken?: number | null;
   closing?: boolean;
   /** `instant` skips the exit animation (keyboard close). */
   onClose: (instant?: boolean) => void;
@@ -210,9 +208,7 @@ export default function HoistPanel({
         await s.hoistTo(0, 0.5);
         await s.hoistTo(1, 2);
       }
-      toast(taken !== null && taken >= SALON_SEATS
-        ? "¡Listo! Recibimos tu bandera. El Salón está completo: queda en lista de espera hasta que se libere un lugar."
-        : "¡Listo! Recibimos tu bandera. La vamos a revisar y, cuando la aprobemos, aparece en el Salón de la Fama.");
+      toast("¡Listo! Recibimos tu bandera. La vamos a revisar y, cuando la aprobemos, aparece en el Salón de la Fama.");
       if (pathname === "/") onClose();
       else router.push("/");
     } catch {

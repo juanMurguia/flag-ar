@@ -3,7 +3,6 @@ import { sameOrigin } from "@/lib/server/csrf";
 import { readJson, reply } from "@/lib/server/http";
 import { invalidate } from "@/lib/server/startups";
 import { BUCKET_PUBLIC, serviceClient } from "@/lib/server/supabase";
-import { SALON_SEATS } from "@/lib/startups/model";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,14 +33,6 @@ export async function POST(req: Request) {
   switch (body.action) {
     case "approve":
       if (!row.logo_path) return reply(409, { message: "This flag has no logo." });
-      if (row.status !== "approved") {
-        const { count, error: countErr } = await db
-          .from("startups").select("id", { count: "exact", head: true }).eq("status", "approved");
-        if (countErr) return reply(500, { message: countErr.message });
-        if ((count ?? 0) >= SALON_SEATS) {
-          return reply(409, { message: `The hall is full (${SALON_SEATS} seats). The flag stays pending, on the waitlist.` });
-        }
-      }
       patch = { ...review, status: "approved", approved_at: now, reject_reason: null };
       break;
     case "reject":

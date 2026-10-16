@@ -3,12 +3,6 @@ import { normalizeLink } from "@/lib/server/validate";
 
 export type StartupStatus = "pending" | "approved" | "rejected";
 
-/**
- * Seats in the Hall of Fame. Only approved flags take one. When the hall is full, new flags still come in
- * and wait as pending (the waitlist): the admin API refuses an approval past this number.
- */
-export const SALON_SEATS = 100;
-
 /** Hall of Fame seat order: most likes first; on a tie, the older flag (lower order number) first. */
 export function bySeat(a: Pick<PublicStartup, "likes" | "order">, b: Pick<PublicStartup, "likes" | "order">): number {
   return b.likes - a.likes || a.order - b.order;

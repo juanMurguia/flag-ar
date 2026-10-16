@@ -726,9 +726,7 @@ export default function SalonApp({ initial, focusSlug, fallback }: {
       )}
 
       {view === "3d" && hoist !== "closed" && (
-        <HoistPanel
-          scene={scene} webgl taken={all.length} closing={hoist === "closing"} onClose={closeHoist} onClosed={hoistClosed}
-        />
+        <HoistPanel scene={scene} webgl closing={hoist === "closing"} onClose={closeHoist} onClosed={hoistClosed} />
       )}
 
       {view === "grid" && (

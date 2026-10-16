@@ -1,7 +1,7 @@
 // Hall of Fame: a short row of flagpoles rising out of a sea of golden sunset clouds. A central
 // corridor runs toward the sun; the Argentine flag stands in it, a little larger and taller.
 //
-// Cost model: one pole per approved startup (at most SALON_SEATS), plus one empty pole while seats are left.
+// Cost model: one pole per approved startup, plus one empty pole for the next hoist.
 // Most likes stand in the front row; fewer likes, further back. Only the Argentine flag and the showcase
 // flag are real cloth simulations (cloth.ts). Hall flags wave in the vertex shader (wave.ts, gust mode),
 // each on its own beat: no CPU cost per flag, so the frame time does not grow with the hall.
@@ -9,7 +9,7 @@
 // - Empty slots hold plain white "tu startup acá" flags, so the hall never looks empty.
 // - Every pole stands on a crag that breaks through the clouds; far spires out in the sea give the scale.
 import * as THREE from "three";
-import { SALON_SEATS, type PublicStartup } from "@/lib/startups/model";
+import type { PublicStartup } from "@/lib/startups/model";
 import { Birds } from "./birds";
 import { FrameAverage, applyFinish, canvasToBlob } from "./finish";
 import { ClothSim, type WindLook } from "./cloth";
@@ -470,8 +470,8 @@ export class SalonScene {
     if (showingId !== undefined) this.showing = list.findIndex((s) => s.id === showingId);
     this.knownIds = new Set(list.map((s) => s.id));
     this.rising.clear();
-    this.poled = Math.min(list.length, SALON_SEATS);
-    const count = this.poled < SALON_SEATS ? this.poled + 1 : this.poled; // one pole free while seats are left: the hoist needs it
+    this.poled = list.length;
+    const count = this.poled + 1; // one free pole: the hoist needs it
     this.cols = 2;
     // Phones are narrow: a third cloth each side would start out of frame.
     const narrow = window.matchMedia?.("(max-width: 767px)").matches;
